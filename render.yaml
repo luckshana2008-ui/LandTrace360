@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: landtrace360-backend
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: FRONTEND_URL
+        sync: false   # Set this manually in Render dashboard to your Vercel URL
