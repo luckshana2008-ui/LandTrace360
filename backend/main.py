@@ -13,13 +13,17 @@ except ImportError:
 
 app = FastAPI(title="LandTrace360 Complete API")
 
-# CORS — allow localhost for development + any deployed frontend URL set via FRONTEND_URL env var
+# CORS — always allow the deployed Vercel frontend + localhost for dev.
+# FRONTEND_URL env var is also respected if set (e.g. for staging/preview URLs).
+_VERCEL_URL = "https://land-trace360.vercel.app"
 _frontend_url = os.environ.get("FRONTEND_URL", "")
 _allowed_origins = [
     "http://localhost:5173",
     "http://localhost:3000",
+    _VERCEL_URL,  # production Vercel frontend — always allowed
 ]
-if _frontend_url:
+# Add FRONTEND_URL env var if it is set and not already in the list
+if _frontend_url and _frontend_url not in _allowed_origins:
     _allowed_origins.append(_frontend_url)
 
 app.add_middleware(

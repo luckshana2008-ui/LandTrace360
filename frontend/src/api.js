@@ -1,5 +1,8 @@
 // Central API base URL — reads from Vite env variable.
-// Set VITE_API_URL in .env.local for dev, or in Vercel dashboard for production.
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// In Vercel dashboard: set VITE_API_URL = https://landtrace360.onrender.com
+// Falls back to the production Render URL so the deployed site always works.
+const API_BASE =
+    import.meta.env.VITE_API_URL ||
+    'https://landtrace360.onrender.com';
 
 export default API_BASE;
