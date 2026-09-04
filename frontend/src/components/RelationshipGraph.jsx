@@ -1,13 +1,16 @@
-import { Network } from 'lucide-react';
+import { Network, Share2 } from 'lucide-react';
 
 const RelationshipGraph = ({ land, owners, docs, cases, mortgages }) => {
     return (
         <div className="glass-panel" style={{ marginTop: '2rem' }}>
             <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}>
-                <Network color="#3b82f6" /> Relationship Graph
+                <Share2 size={24} color="var(--accent-color)" /> Entity Relationship Diagram (v2)
             </h2>
-            <div style={{ padding: '2rem', background: 'rgba(0,0,0,0.2)', borderRadius: '12px', position: 'relative', overflowX: 'auto' }}>
-                <div style={{ display: 'flex', alignItems: 'center', minWidth: '800px', padding: '2rem' }}>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>
+                A visual representation of the land's current ecosystem mapping.
+            </p>
+            <div style={{ width: '100%', overflowX: 'auto', paddingBottom: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', minWidth: '800px', padding: '2rem', background: 'rgba(0,0,0,0.1)', borderRadius: '12px' }}>
 
                     {/* Land Node */}
                     <div style={{ padding: '1rem', background: 'var(--accent-color)', borderRadius: '8px', zIndex: 2 }}>

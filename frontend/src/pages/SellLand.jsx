@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Send, PlusCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import API_BASE from '../api';
+import SellerDocumentManager from '../components/SellerDocumentManager';
 
 const SellLand = () => {
     const [lands, setLands] = useState([]);
@@ -61,22 +62,22 @@ const SellLand = () => {
                                 {lands.map(l => <option key={l.id} value={l.id}>{l.id} - {l.location}</option>)}
                             </select>
                         </div>
-                        <div style={{ display: 'flex', gap: '1rem' }}>
-                            <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                            <div style={{ flex: '1 1 250px' }}>
                                 <label>Location</label>
                                 <input type="text" name="location" value={formData.location} readOnly style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: '#aaa', cursor: 'not-allowed' }} />
                             </div>
-                            <div style={{ flex: 1 }}>
+                            <div style={{ flex: '1 1 250px' }}>
                                 <label>Area (sq ft)</label>
                                 <input type="text" name="area" value={formData.area} readOnly style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: '#aaa', cursor: 'not-allowed' }} />
                             </div>
                         </div>
-                        <div style={{ display: 'flex', gap: '1rem' }}>
-                            <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                            <div style={{ flex: '1 1 250px' }}>
                                 <label>Land Type</label>
                                 <input type="text" name="land_type" value={formData.land_type} readOnly style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: '#aaa', cursor: 'not-allowed' }} />
                             </div>
-                            <div style={{ flex: 1 }}>
+                            <div style={{ flex: '1 1 250px' }}>
                                 <label>Asking Price (₹)</label>
                                 <input type="number" name="expected_price" value={formData.expected_price} onChange={handleChange} required style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', borderRadius: '8px' }} />
                             </div>
@@ -102,8 +103,8 @@ const SellLand = () => {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', background: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
                             <h3 style={{ margin: 0, paddingBottom: '0.5rem', borderBottom: '1px solid var(--border-color)' }}>Additional Property Information</h3>
 
-                            <div style={{ display: 'flex', gap: '1rem' }}>
-                                <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                                <div style={{ flex: '1 1 250px' }}>
                                     <label>Current Land Use</label>
                                     <select name="current_land_use" value={formData.current_land_use} onChange={handleChange} style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', color: 'white' }}>
                                         <option value="">Select an option</option>
@@ -115,7 +116,7 @@ const SellLand = () => {
                                         <option value="Other">Other</option>
                                     </select>
                                 </div>
-                                <div style={{ flex: 1 }}>
+                                <div style={{ flex: '1 1 250px' }}>
                                     <label>Compound Wall / Fencing</label>
                                     <select name="compound_wall" value={formData.compound_wall} onChange={handleChange} style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', color: 'white' }}>
                                         <option value="">Select Yes / No</option>
@@ -126,7 +127,7 @@ const SellLand = () => {
                             </div>
 
                             <div style={{ display: 'flex', gap: '1rem' }}>
-                                <div style={{ flex: 1 }}>
+                                <div style={{ flex: '1 1 250px' }}>
                                     <label>House on Land</label>
                                     <select name="house_on_land" value={formData.house_on_land} onChange={handleChange} style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', color: 'white' }}>
                                         <option value="">Select Yes / No</option>
@@ -140,8 +141,8 @@ const SellLand = () => {
                                 </div>
                             </div>
 
-                            <div style={{ display: 'flex', gap: '1rem' }}>
-                                <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                                <div style={{ flex: '1 1 250px' }}>
                                     <label>Well / Borewell</label>
                                     <select name="well_borewell" value={formData.well_borewell} onChange={handleChange} style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', color: 'white' }}>
                                         <option value="">Select Yes / No</option>
@@ -155,8 +156,8 @@ const SellLand = () => {
                                 </div>
                             </div>
 
-                            <div style={{ display: 'flex', gap: '1rem' }}>
-                                <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                                <div style={{ flex: '1 1 250px' }}>
                                     <label>Road Access</label>
                                     <select name="road_access" value={formData.road_access} onChange={handleChange} style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', color: 'white' }}>
                                         <option value="">Select Yes / No</option>
@@ -170,8 +171,8 @@ const SellLand = () => {
                                 </div>
                             </div>
 
-                            <div style={{ display: 'flex', gap: '1rem' }}>
-                                <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                                <div style={{ flex: '1 1 250px' }}>
                                     <label>Existing Building</label>
                                     <select name="existing_building" value={formData.existing_building} onChange={handleChange} style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', color: 'white' }}>
                                         <option value="">Select Yes / No</option>
@@ -204,6 +205,10 @@ const SellLand = () => {
                                 <textarea name="additional_details" value={formData.additional_details} onChange={handleChange} placeholder="e.g. Corner property suitable for residential construction" style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', borderRadius: '8px', minHeight: '80px' }}></textarea>
                             </div>
                         </div>
+                    )}
+
+                    {formData.land_id && (
+                        <SellerDocumentManager landId={formData.land_id} />
                     )}
 
                     <button type="submit" className="btn-primary" style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', padding: '1rem' }}>

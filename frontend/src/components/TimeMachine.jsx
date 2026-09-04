@@ -51,12 +51,12 @@ const TimeMachine = ({ history, owners, boundary: initialBoundary, fragments: in
                     }}
                     style={{ width: '100%', cursor: 'pointer' }}
                 />
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem', color: 'var(--text-secondary)', fontWeight: 'bold' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', marginTop: '0.5rem', color: 'var(--text-secondary)', fontWeight: 'bold' }}>
                     {history.map(h => <span key={h.year}>{h.year}</span>)}
                 </div>
             </div>
 
-            <div className="grid-cards" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+            <div className="grid-cards">
                 <div style={{ background: 'rgba(0,0,0,0.2)', padding: '1.5rem', borderRadius: '8px' }}>
                     <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Snapshot for {currentRecord.year}</h3>
                     <p style={{ marginTop: '1rem' }}><strong>Owner:</strong> {currentRecord.owner}</p>

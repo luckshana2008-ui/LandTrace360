@@ -126,6 +126,7 @@ h4 {
   font-size: 2rem;
   margin-bottom: 1.5rem;
   background: linear-gradient(to right, #60a5fa, #a78bfa);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -133,7 +134,7 @@ h4 {
 /* Common Layouts */
 .grid-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
   gap: 1.5rem;
 }
 
@@ -180,4 +181,183 @@ button.btn-primary {
 button.btn-primary:hover {
   background: var(--accent-hover);
   transform: translateY(-1px);
+}
+
+/* Responsive Styles */
+@media (max-width: 768px) {
+  :root {
+    --sidebar-width: 250px;
+  }
+
+  .layout {
+    flex-direction: column;
+  }
+
+  .mobile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 90;
+  }
+
+  .mobile-header .brand {
+    margin-bottom: 0;
+    font-size: 1.25rem;
+  }
+
+  .menu-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    padding: 0.5rem;
+  }
+
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    z-index: 1000;
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 900;
+    display: none;
+  }
+
+  .sidebar-overlay.open {
+    display: block;
+  }
+
+  .sidebar .close-btn {
+    display: block;
+    position: absolute;
+    right: 1rem;
+    top: 1.5rem;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+
+  .main-content {
+    margin-left: 0;
+    padding: 1rem;
+    padding-bottom: 4rem;
+  }
+
+  .page-title {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+  }
+
+  div.grid-cards {
+    grid-template-columns: 1fr !important;
+  }
+
+  .glass-panel {
+    padding: 1rem;
+  }
+
+  /* Tables */
+  .table-responsive,
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Map container fix */
+  .leaflet-container {
+    width: 100% !important;
+  }
+
+  .mobile-flex-col {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .mobile-flex-wrap {
+    flex-wrap: wrap !important;
+  }
+
+  .mobile-hide {
+    display: none !important;
+  }
+
+  /* Tabs container */
+  .tabs-container {
+    flex-wrap: nowrap !important;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.5rem !important;
+    overflow-x: auto !important;
+    display: flex !important;
+    gap: 1rem !important;
+  }
+
+  .mobile-block {
+    display: block !important;
+  }
+}
+
+@media (min-width: 769px) {
+
+  .mobile-header,
+  .sidebar-overlay,
+  .sidebar .close-btn {
+    display: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .report-modal-overlay {
+    padding: 0.5rem !important;
+  }
+
+  .report-modal-content {
+    padding: 1.5rem !important;
+  }
+
+  .report-modal-content h1 {
+    font-size: 1.5rem !important;
+  }
+
+  /* ---- Utility ---- */
+  .mobile-hide {
+    display: none !important;
+  }
+
+  /* ---- Available Lands search ---- */
+  .al-filter-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .al-actions {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .al-actions button,
+  .al-actions a {
+    width: 100%;
+    justify-content: center;
+  }
 }

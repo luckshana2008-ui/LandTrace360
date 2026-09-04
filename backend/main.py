@@ -4,6 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
+from fastapi import File, Form, UploadFile
+from fastapi.staticfiles import StaticFiles
+import shutil
+import uuid
+
+os.makedirs("uploads", exist_ok=True)
 
 try:
     from dotenv import load_dotenv
@@ -33,6 +39,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 @app.get("/health")
 def health_check():
@@ -79,7 +87,7 @@ DEMO_LAND_DATA = [
         "id": "LND-1006", "survey_number": "102/B", "subdivision_number": "1",
         "location": "Riverfront", "village": "Waterside", "taluk": "East", "district": "Metro",
         "area_sq_ft": 15000, "land_type": "Commercial", "status": "Verified", "owner": "Riverfront Developers",
-        "is_for_sale": False, "asking_price": None, "posted_date": None,
+        "is_for_sale": True, "asking_price": 2200000, "posted_date": "2026-09-02",
         "risk_score": 25, "health_score": 75, "coordinates": [17.3850, 78.4867] # Approx HYD
     },
     {
@@ -322,6 +330,7 @@ class AskQuery(BaseModel):
 
 ANNOUNCEMENTS = []
 SAVED_LANDS = []
+SELLER_DOCUMENTS = {}
 
 @app.get("/api/dashboard")
 def get_dashboard_stats():
@@ -550,6 +559,59 @@ def get_lands(): return DEMO_LAND_DATA
 @app.get("/api/lands/for-sale")
 def get_lands_for_sale(): return [l for l in DEMO_LAND_DATA if l.get("is_for_sale")]
 
+@app.get("/api/lands/available")
+def get_available_lands(
+    location: Optional[str] = None,
+    district: Optional[str] = None,
+    city: Optional[str] = None,
+    village: Optional[str] = None,
+    land_type: Optional[str] = None,
+    min_price: Optional[int] = None,
+    max_price: Optional[int] = None,
+    min_area: Optional[int] = None,
+    max_area: Optional[int] = None,
+    verification_status: Optional[str] = None
+):
+    results = [l for l in DEMO_LAND_DATA if l.get("is_for_sale")]
+
+    if location:
+        q = location.lower()
+        results = [l for l in results if q in l.get("location", "").lower() or q in l.get("village", "").lower() or q in l.get("taluk", "").lower() or q in l.get("district", "").lower()]
+    
+    if district:
+        q = district.lower()
+        results = [l for l in results if q in l.get("district", "").lower()]
+        
+    if city:
+        q = city.lower()
+        results = [l for l in results if q in l.get("taluk", "").lower() or q in l.get("location", "").lower()]
+        
+    if village:
+        q = village.lower()
+        results = [l for l in results if q in l.get("village", "").lower()]
+        
+    if land_type:
+        q = land_type.lower()
+        results = [l for l in results if q == l.get("land_type", "").lower()]
+        
+    if min_price is not None:
+        results = [l for l in results if l.get("asking_price") is not None and l["asking_price"] >= min_price]
+        
+    if max_price is not None:
+        results = [l for l in results if l.get("asking_price") is not None and l["asking_price"] <= max_price]
+        
+    if min_area is not None:
+        results = [l for l in results if l.get("area_sq_ft") is not None and l["area_sq_ft"] >= min_area]
+        
+    if max_area is not None:
+        results = [l for l in results if l.get("area_sq_ft") is not None and l["area_sq_ft"] <= max_area]
+        
+    if verification_status:
+        q = verification_status.lower()
+        results = [l for l in results if q == l.get("status", "").lower()]
+
+    return results
+
 @app.get("/api/lands/announcements")
 def get_announcements(): return ANNOUNCEMENTS
 
@@ -578,7 +640,114 @@ def get_history(land_id: str): return HISTORY_DATA.get(land_id, HISTORY_DATA["de
 def get_owners(land_id: str): return OWNERS_DATA.get(land_id, OWNERS_DATA["default"])
 
 @app.get("/api/lands/{land_id}/documents")
-def get_documents(land_id: str): return DOCUMENTS_DATA.get(land_id, DOCUMENTS_DATA["default"])
+def get_documents(land_id: str):
+    docs = DOCUMENTS_DATA.get(land_id, DOCUMENTS_DATA["default"]).copy()
+    seller_docs = [v for k, v in SELLER_DOCUMENTS.items() if v["land_id"] == land_id]
+    
+    # Adapt seller docs into the payload
+    for doc in seller_docs:
+        docs.append({
+            "is_uploaded": True,
+            "id": doc["id"],
+            "doc_no": doc["document_number"] or doc["id"][:8],
+            "document_name": doc["document_name"],
+            "type": doc["document_type"],
+            "date": doc["issue_date"] or doc["uploaded_at"][:10],
+            "verification": doc["verification_status"],
+            "result": "Pending Verification" if doc["verification_status"] == "Pending" else doc["verification_status"],
+            "file_path": doc["file_path"],
+            "notes": doc["notes"]
+        })
+    return docs
+
+@app.post("/api/lands/{land_id}/documents")
+def upload_land_document(
+    land_id: str,
+    document_type: str = Form(...),
+    document_name: str = Form(...),
+    document_number: Optional[str] = Form(None),
+    issue_date: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    file: UploadFile = File(...)
+):
+    if not file.filename.lower().endswith(('.pdf', '.png', '.jpg', '.jpeg')):
+        raise HTTPException(status_code=400, detail="Invalid file type")
+        
+    doc_id = str(uuid.uuid4())
+    ext = os.path.splitext(file.filename)[1]
+    filename = f"{doc_id}{ext}"
+    file_path = os.path.join("uploads", filename)
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    doc_record = {
+        "id": doc_id,
+        "land_id": land_id,
+        "document_type": document_type,
+        "document_name": document_name,
+        "document_number": document_number or "",
+        "issue_date": issue_date or "",
+        "file_path": f"/uploads/{filename}",
+        "uploaded_at": datetime.now().isoformat(),
+        "verification_status": "Pending",
+        "notes": notes or ""
+    }
+    SELLER_DOCUMENTS[doc_id] = doc_record
+    return {"status": "success", "data": doc_record}
+
+@app.delete("/api/documents/{document_id}")
+def delete_document(document_id: str):
+    if document_id not in SELLER_DOCUMENTS:
+        raise HTTPException(status_code=404, detail="Document not found")
+    # Delete physically
+    file_path = SELLER_DOCUMENTS[document_id]["file_path"]
+    try:
+        os.remove(file_path.lstrip("/"))
+    except:
+        pass
+    del SELLER_DOCUMENTS[document_id]
+    return {"status": "success"}
+
+@app.put("/api/documents/{document_id}")
+def update_document(
+    document_id: str,
+    document_type: Optional[str] = Form(None),
+    document_name: Optional[str] = Form(None),
+    document_number: Optional[str] = Form(None),
+    issue_date: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None)
+):
+    if document_id not in SELLER_DOCUMENTS:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    doc = SELLER_DOCUMENTS[document_id]
+    if document_type: doc["document_type"] = document_type
+    if document_name: doc["document_name"] = document_name
+    # allow clearing number and date
+    if document_number is not None: doc["document_number"] = document_number
+    if issue_date is not None: doc["issue_date"] = issue_date
+    if notes is not None: doc["notes"] = notes
+    
+    if file:
+        if not file.filename.lower().endswith(('.pdf', '.png', '.jpg', '.jpeg')):
+            raise HTTPException(status_code=400, detail="Invalid file type")
+        # Remove old file
+        old_path = doc["file_path"]
+        try:
+            os.remove(old_path.lstrip("/"))
+        except:
+            pass
+        ext = os.path.splitext(file.filename)[1]
+        filename = f"{document_id}{ext}"
+        new_path = os.path.join("uploads", filename)
+        with open(new_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        doc["file_path"] = f"/uploads/{filename}"
+        doc["verification_status"] = "Pending" # reset status on new upload
+        
+    return {"status": "success", "data": doc}
 
 @app.get("/api/lands/{land_id}/document-verification")
 def get_document_verification(land_id: str): return DOC_VERIFICATION_DATA.get(land_id, DOC_VERIFICATION_DATA["default"])
@@ -654,6 +823,23 @@ def get_verification_report(land_id: str):
     risk = RISK_DATA.get(land_id, RISK_DATA["default"])
     history = HISTORY_DATA.get(land_id, HISTORY_DATA["default"])
     
+    # Regenerate docs natively avoiding returning just dict copies
+    docs = DOCUMENTS_DATA.get(land_id, DOCUMENTS_DATA["default"]).copy()
+    seller_docs = [v for k, v in SELLER_DOCUMENTS.items() if v["land_id"] == land_id]
+    for doc in seller_docs:
+        docs.append({
+            "is_uploaded": True,
+            "id": doc["id"],
+            "doc_no": doc["document_number"] or doc["id"][:8],
+            "document_name": doc["document_name"],
+            "type": doc["document_type"],
+            "date": doc["issue_date"] or doc["uploaded_at"][:10],
+            "verification": doc["verification_status"],
+            "result": "Pending Verification" if doc["verification_status"] == "Pending" else doc["verification_status"],
+            "file_path": doc["file_path"],
+            "notes": doc["notes"]
+        })
+
     # Generate simple summary
     summary = f"Based on synthetic records, {land_id} is a {land['area_sq_ft']} sq ft {land['land_type']} property owned by {land['owner']}. "
     summary += f"The AI Risk level is {risk['level']} (score: {risk['overall_score']}). "
