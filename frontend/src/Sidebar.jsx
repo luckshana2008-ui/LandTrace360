@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Search, ShoppingCart, Target, Bookmark, MessageSquare, Bell, FileText, X } from 'lucide-react';
+import { Home, Search, ShoppingCart, Target, Bookmark, MessageSquare, Bell, FileText, ShieldCheck, X } from 'lucide-react';
 
 const Sidebar = ({ isOpen, closeSidebar }) => {
     return (
@@ -32,6 +32,9 @@ const Sidebar = ({ isOpen, closeSidebar }) => {
                 </NavLink>
                 <NavLink to="/report" onClick={closeSidebar} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
                     <FileText size={20} /> Verification Report
+                </NavLink>
+                <NavLink to="/loan-closure" onClick={closeSidebar} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+                    <ShieldCheck size={20} /> Loan Closure
                 </NavLink>
             </nav>
         </div>

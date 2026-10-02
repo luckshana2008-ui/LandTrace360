@@ -14,6 +14,7 @@ const SellLand = () => {
         current_land_use: '', nearby_facilities: '', additional_details: ''
     });
     const [showAdditional, setShowAdditional] = useState(false);
+    const [landDocuments, setLandDocuments] = useState([]);
 
     useEffect(() => {
         fetch(`${API_BASE}/api/lands`).then(res => res.json()).then(setLands);
@@ -39,6 +40,27 @@ const SellLand = () => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
+
+        // Check documents constraint
+        const uploadedDocs = landDocuments.filter(d => d.is_uploaded);
+        if (uploadedDocs.length === 0) {
+            alert("Land document is required before this property can be published for sale.");
+            return;
+        }
+
+        const hasVerified = uploadedDocs.some(d => d.verification === 'Verified' || d.verification === 'VERIFIED MATCH');
+        const hasPending = uploadedDocs.some(d => d.verification === 'Pending' || d.verification === 'Pending Verification');
+
+        if (!hasVerified) {
+            if (hasPending) {
+                alert("Document verification is still pending. The land cannot be published yet.");
+                return;
+            } else {
+                alert("Document verification failed. Please upload a valid document.");
+                return;
+            }
+        }
+
         fetch(`${API_BASE}/api/lands/announcements`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -208,7 +230,14 @@ const SellLand = () => {
                     )}
 
                     {formData.land_id && (
-                        <SellerDocumentManager landId={formData.land_id} />
+                        <div style={{ marginTop: '1.5rem', background: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '8px', border: '1px solid rgba(255,165,0,0.5)' }}>
+                            <h3 style={{ margin: 0, paddingBottom: '0.5rem', color: 'orange' }}>Mandatory Requirement</h3>
+                            <p style={{ margin: '0.5rem 0 1rem 0' }}><strong>Land document is required to publish this property for sale.</strong></p>
+                            <p style={{ fontSize: '0.85rem', color: '#aaa', margin: '0 0 1rem 0' }}>
+                                Document verification is a demonstration feature using project records and does not constitute legal verification.
+                            </p>
+                            <SellerDocumentManager landId={formData.land_id} onDocumentsChange={setLandDocuments} />
+                        </div>
                     )}
 
                     <button type="submit" className="btn-primary" style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', padding: '1rem' }}>

@@ -1,15 +1,32 @@
 import os
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
-from fastapi import File, Form, UploadFile
-from fastapi.staticfiles import StaticFiles
+import sys
+from pathlib import Path
+
+# Ensure backend directory is in sys.path regardless of execution directory (root vs backend)
+_BACKEND_DIR = str(Path(__file__).resolve().parent)
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
+
+import logging
 import shutil
 import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import List, Optional
 
-os.makedirs("uploads", exist_ok=True)
+from fastapi import FastAPI, HTTPException, Depends, File, Form, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError, DatabaseError
+
+from database import get_db, engine, SessionLocal
+from models import (
+    Base, Land, Owner, LandDocument, LegalCase, Mortgage,
+    LandHistory, SavedLand, SellerListing, SellerPropertyDetail,
+    VerificationRecord, Alert, SellerDocumentUpload
+)
 
 try:
     from dotenv import load_dotenv
@@ -17,16 +34,158 @@ try:
 except ImportError:
     pass
 
-app = FastAPI(title="LandTrace360 Complete API")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+UPLOADS_DIR = Path(_BACKEND_DIR) / "uploads"
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+
+DB_AVAILABLE = False
+
+
+
+def _seed_database():
+    """Idempotent seed: inserts demo data only if rows don't already exist."""
+    db = SessionLocal()
+    try:
+        # --- Lands ---
+        for l_data in DEMO_LAND_DATA:
+            if not db.query(Land).filter(Land.id == l_data["id"]).first():
+                db.add(Land(
+                    id=l_data["id"], survey_number=l_data["survey_number"],
+                    subdivision_number=l_data["subdivision_number"],
+                    location=l_data["location"], village=l_data["village"],
+                    taluk=l_data["taluk"], district=l_data["district"],
+                    area_sq_ft=l_data["area_sq_ft"], land_type=l_data["land_type"],
+                    owner=l_data["owner"], status=l_data["status"],
+                    is_for_sale=l_data.get("is_for_sale", False),
+                    asking_price=l_data.get("asking_price"),
+                    posted_date=l_data.get("posted_date"),
+                    risk_score=l_data["risk_score"], health_score=l_data["health_score"],
+                    coordinates=l_data["coordinates"]
+                ))
+        db.commit()
+        logger.info("Lands seeded.")
+
+        # --- Owners ---
+        for land_id, owners_list in OWNERS_DATA.items():
+            if land_id == "default":
+                continue
+            for o in owners_list:
+                if not db.query(Owner).filter(Owner.land_id == land_id, Owner.name == o["name"]).first():
+                    db.add(Owner(land_id=land_id, name=o["name"], period=o["period"], owner_type=o["type"]))
+        db.commit()
+
+        # --- History ---
+        for land_id, hist_list in HISTORY_DATA.items():
+            if land_id == "default":
+                continue
+            for h in hist_list:
+                if not db.query(LandHistory).filter(LandHistory.land_id == land_id, LandHistory.year == h["year"]).first():
+                    db.add(LandHistory(land_id=land_id, year=h["year"], owner=h["owner"],
+                                       status=h["status"], transactions=h["transactions"],
+                                       risk_score=h["risk_score"], boundary_status=h["boundary_status"]))
+        db.commit()
+        logger.info("History seeded.")
+
+        # --- Documents ---
+        for land_id, docs in DOCUMENTS_DATA.items():
+            if land_id == "default":
+                continue
+            for doc in docs:
+                if not db.query(LandDocument).filter(LandDocument.land_id == land_id, LandDocument.doc_no == doc["doc_no"]).first():
+                    db.add(LandDocument(land_id=land_id, doc_no=doc["doc_no"], type=doc["type"],
+                                        date=doc["date"], verification=doc["verification"], result=doc["result"]))
+        db.commit()
+        logger.info("Documents seeded.")
+
+        # --- Legal Cases ---
+        for land_id, cases_list in CASES_DATA.items():
+            if land_id == "default":
+                continue
+            for c in cases_list:
+                if not db.query(LegalCase).filter(LegalCase.land_id == land_id, LegalCase.case_no == c["case_no"]).first():
+                    db.add(LegalCase(land_id=land_id, case_no=c["case_no"], case_type=c["type"],
+                                     court=c["court"], filing_date=c["filing_date"], status=c["status"]))
+        db.commit()
+        logger.info("Legal cases seeded.")
+
+        # --- Mortgages ---
+        for land_id, mort_list in MORTGAGES_DATA.items():
+            if land_id == "default":
+                continue
+            for m in mort_list:
+                if not db.query(Mortgage).filter(Mortgage.land_id == land_id, Mortgage.bank == m["bank"]).first():
+                    db.add(Mortgage(land_id=land_id, bank=m["bank"], start_date=m["start_date"],
+                                    release_date=m["release_date"], status=m["status"]))
+        db.commit()
+        logger.info("Mortgages seeded.")
+
+        # --- Verification Records ---
+        for land_id, ver in DOC_VERIFICATION_DATA.items():
+            if land_id == "default":
+                continue
+            if not db.query(VerificationRecord).filter(VerificationRecord.land_id == land_id).first():
+                db.add(VerificationRecord(land_id=land_id, overall_result=ver["overall_result"],
+                                          score=ver["score"], fields=ver["fields"],
+                                          explanation=ver["explanation"]))
+        db.commit()
+        logger.info("Verification records seeded.")
+
+        # --- Alerts ---
+        if db.query(Alert).count() == 0:
+            initial_alerts = [
+                Alert(land_id="LND-1004", date=datetime.now().strftime("%Y-%m-%d"),
+                      title="Legal Case Alert", message="Found active legal case for Industrial Estate.", type="Legal Case"),
+                Alert(land_id="LND-1002", date=datetime.now().strftime("%Y-%m-%d"),
+                      title="Boundary Mismatch", message="Boundary discrepancy noted in recent survey.", type="Boundary Change"),
+                Alert(land_id="LND-1007", date=datetime.now().strftime("%Y-%m-%d"),
+                      title="Verification Pending", message="Document details require secondary verification.", type="Document Verification"),
+            ]
+            for a in initial_alerts:
+                db.add(a)
+            db.commit()
+            logger.info("Alerts seeded.")
+
+        logger.info("Database seeding complete.")
+    except Exception as e:
+        logger.error(f"Seeding error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: create tables and seed demo data. Graceful if DB is unavailable."""
+    global DB_AVAILABLE
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created/verified successfully.")
+        _seed_database()
+        DB_AVAILABLE = True
+    except Exception as e:
+        DB_AVAILABLE = False
+        logger.warning(
+            f"Database initialization deferred (PostgreSQL not reachable or connection error): {e}\n"
+            "Set DATABASE_URL in your environment or .env file. "
+            "The application will start with in-memory / demo data fallbacks."
+        )
+    yield
+    # shutdown
+
+
+app = FastAPI(title="LandTrace360 Complete API", lifespan=lifespan)
 
 # CORS — always allow the deployed Vercel frontend + localhost for dev.
 # FRONTEND_URL env var is also respected if set (e.g. for staging/preview URLs).
 _VERCEL_URL = "https://land-trace360.vercel.app"
-_frontend_url = os.environ.get("FRONTEND_URL", "")
+_frontend_url = os.environ.get("FRONTEND_URL", "").strip()
 _allowed_origins = [
     "http://localhost:5173",
     "http://localhost:3000",
     _VERCEL_URL,  # production Vercel frontend — always allowed
+    "https://landtrace360.vercel.app",
 ]
 # Add FRONTEND_URL env var if it is set and not already in the list
 if _frontend_url and _frontend_url not in _allowed_origins:
@@ -35,12 +194,13 @@ if _frontend_url and _frontend_url not in _allowed_origins:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 @app.get("/health")
 def health_check():
@@ -328,29 +488,91 @@ class Announcement(BaseModel):
 class AskQuery(BaseModel):
     question: str
 
-ANNOUNCEMENTS = []
-SAVED_LANDS = []
-SELLER_DOCUMENTS = {}
+def _resolve_land_id(identifier: str, db: Optional[Session] = None) -> str:
+    """Resolve an identifier that might be a survey_number or land_id to a canonical land_id."""
+    clean_id = (identifier or "").strip()
+    for l in DEMO_LAND_DATA:
+        if l["id"].upper() == clean_id.upper():
+            return l["id"]
+    for l in DEMO_LAND_DATA:
+        if (l.get("survey_number") or "").strip().upper() == clean_id.upper():
+            return l["id"]
+    if db is not None:
+        try:
+            row = db.query(Land).filter(
+                (Land.id == clean_id) | (Land.survey_number == clean_id)
+            ).first()
+            if row:
+                return row.id
+        except Exception:
+            pass
+    return clean_id
+
+
+# NOTE: ANNOUNCEMENTS and SELLER_DOCUMENTS are now persisted in the database.
+# These variables are intentionally removed; use DB queries instead.
 
 @app.get("/api/dashboard")
-def get_dashboard_stats():
-    total = len(DEMO_LAND_DATA)
-    verified = len([l for l in DEMO_LAND_DATA if l.get("status") == "Verified"])
-    for_sale = len([l for l in DEMO_LAND_DATA if l.get("is_for_sale")])
-    
-    # Calculate high risk appropriately based on RISK_DATA or just assume a mock number
+def get_dashboard_stats(db: Session = Depends(get_db)):
+    if DB_AVAILABLE:
+        try:
+            total = db.query(Land).count()
+            verified = db.query(Land).filter(Land.status == "Verified").count()
+            for_sale = db.query(Land).filter(Land.is_for_sale == True).count()
+            recent_announcements = db.query(SellerListing).count()
+        except Exception:
+            total = len(DEMO_LAND_DATA)
+            verified = len([l for l in DEMO_LAND_DATA if l.get("status") == "Verified"])
+            for_sale = len([l for l in DEMO_LAND_DATA if l.get("is_for_sale")])
+            recent_announcements = 0
+    else:
+        total = len(DEMO_LAND_DATA)
+        verified = len([l for l in DEMO_LAND_DATA if l.get("status") == "Verified"])
+        for_sale = len([l for l in DEMO_LAND_DATA if l.get("is_for_sale")])
+        recent_announcements = 0
     high_risk = len([v for k, v in RISK_DATA.items() if k != "default" and v.get("level") == "HIGH"])
-    
     return {
         "total_lands": total,
         "verified_lands": verified,
         "lands_for_sale": for_sale,
         "high_risk_lands": high_risk,
-        "recent_announcements": len(ANNOUNCEMENTS)
+        "recent_announcements": recent_announcements,
+        "documents_requiring_review": 2,
+        "new_alerts": 3,
+        "average_land_health": 82,
+        "predicted_risk_changes": "2 lands showing increasing risk"
+    }
+
+def _land_to_dict(land: Land) -> dict:
+    return {
+        "id": land.id, "survey_number": land.survey_number,
+        "subdivision_number": land.subdivision_number, "location": land.location,
+        "village": land.village, "taluk": land.taluk, "district": land.district,
+        "area_sq_ft": land.area_sq_ft, "land_type": land.land_type, "owner": land.owner,
+        "status": land.status, "is_for_sale": land.is_for_sale,
+        "asking_price": land.asking_price, "posted_date": land.posted_date,
+        "risk_score": land.risk_score, "health_score": land.health_score,
+        "coordinates": land.coordinates
     }
 
 @app.get("/api/search")
-def search_lands(q: Optional[str] = None, status: Optional[str] = None, land_type: Optional[str] = None):
+def search_lands(q: Optional[str] = None, status: Optional[str] = None, land_type: Optional[str] = None, db: Session = Depends(get_db)):
+    if DB_AVAILABLE:
+        try:
+            query = db.query(Land)
+            if status:
+                query = query.filter(Land.status == status)
+            if land_type:
+                query = query.filter(Land.land_type == land_type)
+            lands = query.all()
+            if lands:
+                results = [_land_to_dict(l) for l in lands]
+                if q:
+                    q_lower = q.lower()
+                    results = [l for l in results if q_lower in l["id"].lower() or q_lower in l["survey_number"].lower() or q_lower in l["location"].lower() or q_lower in l["owner"].lower()]
+                return results
+        except Exception:
+            pass
     results = DEMO_LAND_DATA
     if q:
         q_lower = q.lower()
@@ -361,39 +583,99 @@ def search_lands(q: Optional[str] = None, status: Optional[str] = None, land_typ
         results = [l for l in results if l["land_type"].lower() == land_type.lower()]
     return results
 
-@app.get("/api/saved-lands")
-def get_saved_lands():
-    return SAVED_LANDS
+_IN_MEMORY_SAVED_LANDS = set()
 
-@app.post("/api/saved-lands/{land_id}")
-def toggle_saved_land(land_id: str):
-    if land_id in SAVED_LANDS:
-        SAVED_LANDS.remove(land_id)
+@app.get("/api/saved-lands")
+def get_saved_lands(db: Session = Depends(get_db)):
+    if DB_AVAILABLE:
+        try:
+            saved = db.query(SavedLand).all()
+            return [s.land_id for s in saved]
+        except Exception:
+            pass
+    return list(_IN_MEMORY_SAVED_LANDS)
+
+@app.post("/api/saved-lands/{land_id:path}")
+def toggle_saved_land(land_id: str, db: Session = Depends(get_db)):
+    if DB_AVAILABLE:
+        try:
+            ex = db.query(SavedLand).filter(SavedLand.land_id == land_id).first()
+            if ex:
+                db.delete(ex)
+                db.commit()
+                return {"status": "removed"}
+            else:
+                db.add(SavedLand(land_id=land_id))
+                db.commit()
+                return {"status": "added"}
+        except Exception:
+            pass
+    if land_id in _IN_MEMORY_SAVED_LANDS:
+        _IN_MEMORY_SAVED_LANDS.remove(land_id)
         return {"status": "removed"}
     else:
-        SAVED_LANDS.append(land_id)
+        _IN_MEMORY_SAVED_LANDS.add(land_id)
         return {"status": "added"}
 
-@app.post("/api/lands/{land_id}/ask")
+@app.post("/api/lands/{land_id:path}/save")
+def save_land_explicit(land_id: str, db: Session = Depends(get_db)):
+    if DB_AVAILABLE:
+        try:
+            ex = db.query(SavedLand).filter(SavedLand.land_id == land_id).first()
+            if not ex:
+                db.add(SavedLand(land_id=land_id))
+                db.commit()
+            return {"status": "added"}
+        except Exception:
+            pass
+    _IN_MEMORY_SAVED_LANDS.add(land_id)
+    return {"status": "added"}
+
+@app.delete("/api/lands/{land_id:path}/save")
+def delete_saved_land_explicit(land_id: str, db: Session = Depends(get_db)):
+    if DB_AVAILABLE:
+        try:
+            ex = db.query(SavedLand).filter(SavedLand.land_id == land_id).first()
+            if ex:
+                db.delete(ex)
+                db.commit()
+            return {"status": "removed"}
+        except Exception:
+            pass
+    _IN_MEMORY_SAVED_LANDS.discard(land_id)
+    return {"status": "removed"}
+    
+@app.get("/api/lands/saved")
+def get_saved_explicit(db: Session = Depends(get_db)):
+    if DB_AVAILABLE:
+        try:
+            saved = db.query(SavedLand).all()
+            return [s.land_id for s in saved]
+        except Exception:
+            pass
+    return list(_IN_MEMORY_SAVED_LANDS)
+
+@app.post("/api/lands/{land_id:path}/ask")
 def ask_land_ai(land_id: str, query: AskQuery):
     """Refined AI endpoint handling detailed, land-specific demo interactions."""
+    canonical_id = _resolve_land_id(land_id)
     q = query.question.lower().strip()
-    land = next((l for l in DEMO_LAND_DATA if l["id"] == land_id), None)
+    land = next((l for l in DEMO_LAND_DATA if l["id"] == canonical_id), None)
     
-    if "other land" in q or "different land" in q or not land_id.startswith("LND-"):
+    if "other land" in q or "different land" in q or not canonical_id.startswith("LND-"):
         return {"answer": "I can answer questions about this land using the available LandTrace360 demo records.", "sources": []}
 
     if not land:
         return {"answer": "I can answer questions about this land using the available LandTrace360 demo records.", "sources": []}
 
-    risk = RISK_DATA.get(land_id, RISK_DATA["default"])
-    dna = DNA_DATA.get(land_id, DNA_DATA["default"])
-    docs = DOCUMENTS_DATA.get(land_id, DOCUMENTS_DATA["default"])
-    cases = CASES_DATA.get(land_id, CASES_DATA["default"])
-    mortgages = MORTGAGES_DATA.get(land_id, MORTGAGES_DATA["default"])
-    boundary = BOUNDARY_DETECTION_DATA.get(land_id, BOUNDARY_DETECTION_DATA["default"])
-    frag = FRAGMENTATION_ANALYSIS_DATA.get(land_id, FRAGMENTATION_ANALYSIS_DATA["default"])
-    history = HISTORY_DATA.get(land_id, HISTORY_DATA["default"])
+    risk = RISK_DATA.get(canonical_id, RISK_DATA["default"])
+    dna = DNA_DATA.get(canonical_id, DNA_DATA["default"])
+    docs = DOCUMENTS_DATA.get(canonical_id, DOCUMENTS_DATA["default"])
+    cases = CASES_DATA.get(canonical_id, CASES_DATA["default"])
+    mortgages = MORTGAGES_DATA.get(canonical_id, MORTGAGES_DATA["default"])
+    boundary = BOUNDARY_DETECTION_DATA.get(canonical_id, BOUNDARY_DETECTION_DATA["default"])
+    frag = FRAGMENTATION_ANALYSIS_DATA.get(canonical_id, FRAGMENTATION_ANALYSIS_DATA["default"])
+    history = HISTORY_DATA.get(canonical_id, HISTORY_DATA["default"])
 
     sources = []
 
@@ -513,23 +795,26 @@ FRAGMENTATION_ANALYSIS_DATA = {
     "default": {"original_area": 10000, "current_area": 10000, "subdivisions": 0, "status": "No Fragmentation", "percentage_lost": 0, "risk_impact": "Low", "description": "No significant fragmentation metrics found."}
 }
 
-@app.get("/api/lands/{land_id}/boundary-changes")
+@app.get("/api/lands/{land_id:path}/boundary-changes")
 def get_boundary_changes(land_id: str, year: Optional[int] = None):
     if year and year in BOUNDARY_HISTORY:
         return BOUNDARY_HISTORY[year]
     return BOUNDARY_HISTORY[2026]
 
-@app.get("/api/lands/{land_id}/boundary-detection")
+@app.get("/api/lands/{land_id:path}/boundary-detection")
 def get_boundary_detection(land_id: str):
-    return BOUNDARY_DETECTION_DATA.get(land_id, BOUNDARY_DETECTION_DATA["default"])
+    canonical_id = _resolve_land_id(land_id)
+    return BOUNDARY_DETECTION_DATA.get(canonical_id, BOUNDARY_DETECTION_DATA["default"])
 
-@app.get("/api/lands/{land_id}/fragmentation-analysis")
+@app.get("/api/lands/{land_id:path}/fragmentation-analysis")
 def get_fragmentation_analysis(land_id: str):
-    return FRAGMENTATION_ANALYSIS_DATA.get(land_id, FRAGMENTATION_ANALYSIS_DATA["default"])
+    canonical_id = _resolve_land_id(land_id)
+    return FRAGMENTATION_ANALYSIS_DATA.get(canonical_id, FRAGMENTATION_ANALYSIS_DATA["default"])
 
-@app.get("/api/lands/{land_id}/fragmentation")
+@app.get("/api/lands/{land_id:path}/fragmentation")
 def get_fragmentation(land_id: str, year: Optional[int] = None):
-    land_area = next((l["area_sq_ft"] for l in DEMO_LAND_DATA if l["id"] == land_id), 0)
+    canonical_id = _resolve_land_id(land_id)
+    land_area = next((l["area_sq_ft"] for l in DEMO_LAND_DATA if l["id"] == canonical_id), 0)
     if year and year in FRAGMENTATION_HISTORY:
         frag = FRAGMENTATION_HISTORY[year]
         return {
@@ -554,10 +839,28 @@ def get_high_risk_lands():
     return results
 
 @app.get("/api/lands")
-def get_lands(): return DEMO_LAND_DATA
+@app.get("/lands")
+def get_lands(db: Session = Depends(get_db)):
+    if DB_AVAILABLE:
+        try:
+            lands = db.query(Land).all()
+            if lands:
+                return [_land_to_dict(l) for l in lands]
+        except Exception:
+            pass
+    return DEMO_LAND_DATA
 
 @app.get("/api/lands/for-sale")
-def get_lands_for_sale(): return [l for l in DEMO_LAND_DATA if l.get("is_for_sale")]
+@app.get("/lands/for-sale")
+def get_lands_for_sale(db: Session = Depends(get_db)):
+    if DB_AVAILABLE:
+        try:
+            lands = db.query(Land).filter(Land.is_for_sale == True).all()
+            if lands:
+                return [_land_to_dict(l) for l in lands]
+        except Exception:
+            pass
+    return [l for l in DEMO_LAND_DATA if l.get("is_for_sale")]
 
 @app.get("/api/lands/available")
 def get_available_lands(
@@ -570,97 +873,169 @@ def get_available_lands(
     max_price: Optional[int] = None,
     min_area: Optional[int] = None,
     max_area: Optional[int] = None,
-    verification_status: Optional[str] = None
+    verification_status: Optional[str] = None,
+    db: Session = Depends(get_db)
 ):
+    if DB_AVAILABLE:
+        try:
+            query = db.query(Land).filter(Land.is_for_sale == True)
+            if land_type:
+                query = query.filter(Land.land_type == land_type)
+            if verification_status:
+                query = query.filter(Land.status == verification_status)
+            if min_price is not None:
+                query = query.filter(Land.asking_price >= min_price)
+            if max_price is not None:
+                query = query.filter(Land.asking_price <= max_price)
+            if min_area is not None:
+                query = query.filter(Land.area_sq_ft >= min_area)
+            if max_area is not None:
+                query = query.filter(Land.area_sq_ft <= max_area)
+            results = [_land_to_dict(l) for l in query.all()]
+            if location:
+                q = location.lower()
+                results = [l for l in results if q in l.get("location","").lower() or q in l.get("village","").lower() or q in l.get("taluk","").lower() or q in l.get("district","").lower()]
+            if district:
+                q = district.lower()
+                results = [l for l in results if q in l.get("district","").lower()]
+            if city:
+                q = city.lower()
+                results = [l for l in results if q in l.get("taluk","").lower() or q in l.get("location","").lower()]
+            if village:
+                q = village.lower()
+                results = [l for l in results if q in l.get("village","").lower()]
+            return results
+        except Exception:
+            pass
     results = [l for l in DEMO_LAND_DATA if l.get("is_for_sale")]
-
-    if location:
-        q = location.lower()
-        results = [l for l in results if q in l.get("location", "").lower() or q in l.get("village", "").lower() or q in l.get("taluk", "").lower() or q in l.get("district", "").lower()]
-    
-    if district:
-        q = district.lower()
-        results = [l for l in results if q in l.get("district", "").lower()]
-        
-    if city:
-        q = city.lower()
-        results = [l for l in results if q in l.get("taluk", "").lower() or q in l.get("location", "").lower()]
-        
-    if village:
-        q = village.lower()
-        results = [l for l in results if q in l.get("village", "").lower()]
-        
-    if land_type:
-        q = land_type.lower()
-        results = [l for l in results if q == l.get("land_type", "").lower()]
-        
-    if min_price is not None:
-        results = [l for l in results if l.get("asking_price") is not None and l["asking_price"] >= min_price]
-        
-    if max_price is not None:
-        results = [l for l in results if l.get("asking_price") is not None and l["asking_price"] <= max_price]
-        
-    if min_area is not None:
-        results = [l for l in results if l.get("area_sq_ft") is not None and l["area_sq_ft"] >= min_area]
-        
-    if max_area is not None:
-        results = [l for l in results if l.get("area_sq_ft") is not None and l["area_sq_ft"] <= max_area]
-        
-    if verification_status:
-        q = verification_status.lower()
-        results = [l for l in results if q == l.get("status", "").lower()]
-
     return results
 
 @app.get("/api/lands/announcements")
-def get_announcements(): return ANNOUNCEMENTS
+@app.get("/lands/announcements")
+def get_announcements(db: Session = Depends(get_db)):
+    if DB_AVAILABLE:
+        try:
+            listings = db.query(SellerListing).all()
+            return [{
+                "land_id": l.land_id, "location": l.location, "area": l.area,
+                "land_type": l.land_type, "expected_price": l.expected_price,
+                "description": l.description, "contact": l.contact,
+                "posted_date": l.created_at.strftime("%Y-%m-%d") if l.created_at else None
+            } for l in listings]
+        except Exception:
+            pass
+    return []
 
 @app.post("/api/lands/announcements")
-def post_announcement(announcement: Announcement):
+def post_announcement(announcement: Announcement, db: Session = Depends(get_db)):
+    # Check: seller must have a verified uploaded document for this land
+    uploaded_doc = db.query(SellerDocumentUpload).filter(
+        SellerDocumentUpload.land_id == announcement.land_id,
+        SellerDocumentUpload.verification_status == "Verified"
+    ).first()
+    if not uploaded_doc:
+        raise HTTPException(status_code=400, detail="A verified land document must be uploaded before publishing a listing.")
+    posted_date = datetime.now().strftime("%Y-%m-%d")
+    # Idempotent: update existing or insert new
+    existing = db.query(SellerListing).filter(SellerListing.land_id == announcement.land_id).first()
+    if existing:
+        existing.location = announcement.location
+        existing.area = announcement.area
+        existing.land_type = announcement.land_type
+        existing.expected_price = announcement.expected_price
+        existing.description = announcement.description
+        existing.contact = announcement.contact
+        listing = existing
+    else:
+        listing = SellerListing(
+            land_id=announcement.land_id, location=announcement.location,
+            area=announcement.area, land_type=announcement.land_type,
+            expected_price=announcement.expected_price, description=announcement.description,
+            contact=announcement.contact
+        )
+        db.add(listing)
+    # Update land record to mark as for sale
+    land_row = db.query(Land).filter(Land.id == announcement.land_id).first()
+    if land_row:
+        land_row.is_for_sale = True
+        land_row.asking_price = announcement.expected_price
+        land_row.posted_date = posted_date
+    # Save property details
+    db.flush()
+    existing_detail = db.query(SellerPropertyDetail).filter(SellerPropertyDetail.listing_id == listing.id).first()
+    if not existing_detail:
+        db.add(SellerPropertyDetail(
+            listing_id=listing.id,
+            house_on_land=announcement.house_on_land, house_details=announcement.house_details,
+            well_borewell=announcement.well_borewell, water_facility=announcement.water_facility,
+            electricity_available=announcement.electricity_available, road_access=announcement.road_access,
+            road_details=announcement.road_details, compound_wall=announcement.compound_wall,
+            existing_building=announcement.existing_building,
+            existing_building_details=announcement.existing_building_details,
+            current_land_use=announcement.current_land_use,
+            nearby_facilities=announcement.nearby_facilities, additional_details=announcement.additional_details
+        ))
+    db.commit()
     new_ann = announcement.dict()
-    new_ann["posted_date"] = datetime.now().strftime("%Y-%m-%d")
-    ANNOUNCEMENTS.append(new_ann)
-    # Pseudo-update main db for the marketplace integration
-    for land in DEMO_LAND_DATA:
-        if land["id"] == new_ann["land_id"]:
-            land["is_for_sale"] = True
-            land["asking_price"] = new_ann["expected_price"]
+    new_ann["posted_date"] = posted_date
     return {"status": "success", "data": new_ann}
 
-@app.get("/api/lands/{land_id}")
-def get_land(land_id: str):
-    for l in DEMO_LAND_DATA:
-        if l["id"] == land_id: return l
-    raise HTTPException(status_code=404, detail="Land not found")
+@app.get("/api/lands/{land_id:path}/history")
+@app.get("/lands/{land_id:path}/history")
+def get_history(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    if DB_AVAILABLE:
+        try:
+            rows = db.query(LandHistory).filter(LandHistory.land_id == canonical_id).order_by(LandHistory.year).all()
+            if rows:
+                return [{"year": r.year, "owner": r.owner, "status": r.status,
+                         "transactions": r.transactions, "risk_score": r.risk_score,
+                         "boundary_status": r.boundary_status} for r in rows]
+        except Exception:
+            pass
+    return HISTORY_DATA.get(canonical_id, HISTORY_DATA["default"])
 
-@app.get("/api/lands/{land_id}/history")
-def get_history(land_id: str): return HISTORY_DATA.get(land_id, HISTORY_DATA["default"])
+@app.get("/api/lands/{land_id:path}/owners")
+@app.get("/lands/{land_id:path}/owners")
+def get_owners(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    if DB_AVAILABLE:
+        try:
+            rows = db.query(Owner).filter(Owner.land_id == canonical_id).all()
+            if rows:
+                return [{"name": r.name, "period": r.period, "type": r.owner_type} for r in rows]
+        except Exception:
+            pass
+    return OWNERS_DATA.get(canonical_id, OWNERS_DATA["default"])
 
-@app.get("/api/lands/{land_id}/owners")
-def get_owners(land_id: str): return OWNERS_DATA.get(land_id, OWNERS_DATA["default"])
+@app.get("/api/lands/{land_id:path}/documents")
+@app.get("/lands/{land_id:path}/documents")
+def get_documents(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    if DB_AVAILABLE:
+        try:
+            db_docs = db.query(LandDocument).filter(LandDocument.land_id == canonical_id).all()
+            docs = [{"doc_no": d.doc_no, "type": d.type, "date": d.date,
+                     "verification": d.verification, "result": d.result} for d in db_docs]
+            if not docs:
+                docs = DOCUMENTS_DATA.get(canonical_id, DOCUMENTS_DATA["default"]).copy()
+            seller_db_docs = db.query(SellerDocumentUpload).filter(SellerDocumentUpload.land_id == canonical_id).all()
+            for doc in seller_db_docs:
+                docs.append({
+                    "is_uploaded": True, "id": doc.id,
+                    "doc_no": doc.document_number or doc.id[:8],
+                    "document_name": doc.document_name, "type": doc.document_type,
+                    "date": doc.issue_date or (doc.uploaded_at[:10] if doc.uploaded_at else ""),
+                    "verification": doc.verification_status,
+                    "result": "Pending Verification" if doc.verification_status == "Pending" else doc.verification_status,
+                    "file_path": doc.file_path, "notes": doc.notes
+                })
+            return docs
+        except Exception:
+            pass
+    return DOCUMENTS_DATA.get(canonical_id, DOCUMENTS_DATA["default"]).copy()
 
-@app.get("/api/lands/{land_id}/documents")
-def get_documents(land_id: str):
-    docs = DOCUMENTS_DATA.get(land_id, DOCUMENTS_DATA["default"]).copy()
-    seller_docs = [v for k, v in SELLER_DOCUMENTS.items() if v["land_id"] == land_id]
-    
-    # Adapt seller docs into the payload
-    for doc in seller_docs:
-        docs.append({
-            "is_uploaded": True,
-            "id": doc["id"],
-            "doc_no": doc["document_number"] or doc["id"][:8],
-            "document_name": doc["document_name"],
-            "type": doc["document_type"],
-            "date": doc["issue_date"] or doc["uploaded_at"][:10],
-            "verification": doc["verification_status"],
-            "result": "Pending Verification" if doc["verification_status"] == "Pending" else doc["verification_status"],
-            "file_path": doc["file_path"],
-            "notes": doc["notes"]
-        })
-    return docs
-
-@app.post("/api/lands/{land_id}/documents")
+@app.post("/api/lands/{land_id:path}/documents")
 def upload_land_document(
     land_id: str,
     document_type: str = Form(...),
@@ -668,45 +1043,55 @@ def upload_land_document(
     document_number: Optional[str] = Form(None),
     issue_date: Optional[str] = Form(None),
     notes: Optional[str] = Form(None),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
 ):
     if not file.filename.lower().endswith(('.pdf', '.png', '.jpg', '.jpeg')):
         raise HTTPException(status_code=400, detail="Invalid file type")
-        
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
     doc_id = str(uuid.uuid4())
     ext = os.path.splitext(file.filename)[1]
     filename = f"{doc_id}{ext}"
-    file_path = os.path.join("uploads", filename)
-    
+    file_path = UPLOADS_DIR / filename
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-        
+    uploaded_at = datetime.now().isoformat()
+    if DB_AVAILABLE:
+        try:
+            db_doc = SellerDocumentUpload(
+                id=doc_id, land_id=canonical_id, document_type=document_type,
+                document_name=document_name, document_number=document_number or "",
+                issue_date=issue_date or "", file_path=f"/uploads/{filename}",
+                uploaded_at=uploaded_at, verification_status="Pending", notes=notes or ""
+            )
+            db.add(db_doc)
+            db.commit()
+        except Exception:
+            pass
     doc_record = {
-        "id": doc_id,
-        "land_id": land_id,
-        "document_type": document_type,
-        "document_name": document_name,
-        "document_number": document_number or "",
-        "issue_date": issue_date or "",
-        "file_path": f"/uploads/{filename}",
-        "uploaded_at": datetime.now().isoformat(),
-        "verification_status": "Pending",
-        "notes": notes or ""
+        "id": doc_id, "land_id": canonical_id, "document_type": document_type,
+        "document_name": document_name, "document_number": document_number or "",
+        "issue_date": issue_date or "", "file_path": f"/uploads/{filename}",
+        "uploaded_at": uploaded_at, "verification_status": "Pending", "notes": notes or ""
     }
-    SELLER_DOCUMENTS[doc_id] = doc_record
     return {"status": "success", "data": doc_record}
 
 @app.delete("/api/documents/{document_id}")
-def delete_document(document_id: str):
-    if document_id not in SELLER_DOCUMENTS:
+def delete_document(document_id: str, db: Session = Depends(get_db)):
+    if not DB_AVAILABLE:
+        return {"status": "success"}
+    doc = db.query(SellerDocumentUpload).filter(SellerDocumentUpload.id == document_id).first()
+    if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    # Delete physically
-    file_path = SELLER_DOCUMENTS[document_id]["file_path"]
     try:
-        os.remove(file_path.lstrip("/"))
-    except:
+        filename = os.path.basename(doc.file_path)
+        target_path = UPLOADS_DIR / filename
+        if target_path.exists():
+            target_path.unlink()
+    except Exception:
         pass
-    del SELLER_DOCUMENTS[document_id]
+    db.delete(doc)
+    db.commit()
     return {"status": "success"}
 
 @app.put("/api/documents/{document_id}")
@@ -717,59 +1102,122 @@ def update_document(
     document_number: Optional[str] = Form(None),
     issue_date: Optional[str] = Form(None),
     notes: Optional[str] = Form(None),
-    file: Optional[UploadFile] = File(None)
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db)
 ):
-    if document_id not in SELLER_DOCUMENTS:
+    if not DB_AVAILABLE:
+        return {"status": "success", "data": {}}
+    doc = db.query(SellerDocumentUpload).filter(SellerDocumentUpload.id == document_id).first()
+    if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-        
-    doc = SELLER_DOCUMENTS[document_id]
-    if document_type: doc["document_type"] = document_type
-    if document_name: doc["document_name"] = document_name
-    # allow clearing number and date
-    if document_number is not None: doc["document_number"] = document_number
-    if issue_date is not None: doc["issue_date"] = issue_date
-    if notes is not None: doc["notes"] = notes
-    
+    if document_type: doc.document_type = document_type
+    if document_name: doc.document_name = document_name
+    if document_number is not None: doc.document_number = document_number
+    if issue_date is not None: doc.issue_date = issue_date
+    if notes is not None: doc.notes = notes
     if file:
         if not file.filename.lower().endswith(('.pdf', '.png', '.jpg', '.jpeg')):
             raise HTTPException(status_code=400, detail="Invalid file type")
-        # Remove old file
-        old_path = doc["file_path"]
         try:
-            os.remove(old_path.lstrip("/"))
-        except:
+            old_filename = os.path.basename(doc.file_path)
+            old_target = UPLOADS_DIR / old_filename
+            if old_target.exists():
+                old_target.unlink()
+        except Exception:
             pass
         ext = os.path.splitext(file.filename)[1]
         filename = f"{document_id}{ext}"
-        new_path = os.path.join("uploads", filename)
+        new_path = UPLOADS_DIR / filename
         with open(new_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        doc["file_path"] = f"/uploads/{filename}"
-        doc["verification_status"] = "Pending" # reset status on new upload
-        
-    return {"status": "success", "data": doc}
+        doc.file_path = f"/uploads/{filename}"
+        doc.verification_status = "Pending"
+    db.commit()
+    result = {
+        "id": doc.id, "land_id": doc.land_id, "document_type": doc.document_type,
+        "document_name": doc.document_name, "document_number": doc.document_number,
+        "issue_date": doc.issue_date, "file_path": doc.file_path,
+        "uploaded_at": doc.uploaded_at, "verification_status": doc.verification_status, "notes": doc.notes
+    }
+    return {"status": "success", "data": result}
 
-@app.get("/api/lands/{land_id}/document-verification")
-def get_document_verification(land_id: str): return DOC_VERIFICATION_DATA.get(land_id, DOC_VERIFICATION_DATA["default"])
+@app.post("/api/documents/{document_id}/verify")
+def verify_document(document_id: str, db: Session = Depends(get_db)):
+    if not DB_AVAILABLE:
+        return {"status": "success", "data": {}}
+    doc = db.query(SellerDocumentUpload).filter(SellerDocumentUpload.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    doc.verification_status = "Verified"
+    db.commit()
+    result = {
+        "id": doc.id, "land_id": doc.land_id, "document_type": doc.document_type,
+        "document_name": doc.document_name, "document_number": doc.document_number,
+        "issue_date": doc.issue_date, "file_path": doc.file_path,
+        "uploaded_at": doc.uploaded_at, "verification_status": doc.verification_status, "notes": doc.notes
+    }
+    return {"status": "success", "data": result}
 
-@app.get("/api/lands/{land_id}/cases")
-def get_cases(land_id: str): return CASES_DATA.get(land_id, CASES_DATA["default"])
+@app.get("/api/lands/{land_id:path}/document-verification")
+def get_document_verification(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    if DB_AVAILABLE:
+        try:
+            rec = db.query(VerificationRecord).filter(VerificationRecord.land_id == canonical_id).first()
+            if rec:
+                return {"overall_result": rec.overall_result, "score": rec.score,
+                        "fields": rec.fields, "explanation": rec.explanation}
+        except Exception:
+            pass
+    return DOC_VERIFICATION_DATA.get(canonical_id, DOC_VERIFICATION_DATA["default"])
 
-@app.get("/api/lands/{land_id}/mortgages")
-def get_mortgages(land_id: str): return MORTGAGES_DATA.get(land_id, MORTGAGES_DATA["default"])
+@app.get("/api/lands/{land_id:path}/cases")
+@app.get("/lands/{land_id:path}/cases")
+def get_cases(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    if DB_AVAILABLE:
+        try:
+            rows = db.query(LegalCase).filter(LegalCase.land_id == canonical_id).all()
+            if rows:
+                return [{"case_no": r.case_no, "type": r.case_type, "court": r.court,
+                         "filing_date": r.filing_date, "status": r.status} for r in rows]
+        except Exception:
+            pass
+    return CASES_DATA.get(canonical_id, CASES_DATA["default"])
 
-@app.get("/api/lands/{land_id}/risk")
-def get_risk(land_id: str): return RISK_DATA.get(land_id, RISK_DATA["default"])
+@app.get("/api/lands/{land_id:path}/mortgages")
+@app.get("/lands/{land_id:path}/mortgages")
+def get_mortgages(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    if DB_AVAILABLE:
+        try:
+            rows = db.query(Mortgage).filter(Mortgage.land_id == canonical_id).all()
+            if rows:
+                return [{"bank": r.bank, "start_date": r.start_date,
+                         "release_date": r.release_date, "status": r.status} for r in rows]
+        except Exception:
+            pass
+    return MORTGAGES_DATA.get(canonical_id, MORTGAGES_DATA["default"])
 
-@app.get("/api/lands/{land_id}/dna")
-def get_dna(land_id: str): return DNA_DATA.get(land_id, DNA_DATA["default"])
+@app.get("/api/lands/{land_id:path}/risk")
+@app.get("/lands/{land_id:path}/risk")
+def get_risk(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    return RISK_DATA.get(canonical_id, RISK_DATA["default"])
+
+@app.get("/api/lands/{land_id:path}/dna")
+@app.get("/lands/{land_id:path}/dna")
+def get_dna(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    return DNA_DATA.get(canonical_id, DNA_DATA["default"])
 
 class WhatIfQuery(BaseModel):
     scenario: str
 
-@app.post("/api/lands/{land_id}/what-if")
-def what_if_simulator(land_id: str, query: WhatIfQuery):
-    risk = RISK_DATA.get(land_id, RISK_DATA["default"])
+@app.post("/api/lands/{land_id:path}/what-if")
+def what_if_simulator(land_id: str, query: WhatIfQuery, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    risk = RISK_DATA.get(canonical_id, RISK_DATA["default"])
     current_score = risk["overall_score"]
     
     scenarios = {
@@ -798,7 +1246,7 @@ def what_if_simulator(land_id: str, query: WhatIfQuery):
         change = "Decreased"
         
     return {
-        "land_id": land_id,
+        "land_id": canonical_id,
         "current_score": current_score,
         "simulated_score": simulated_score,
         "risk_level": risk_level,
@@ -806,42 +1254,55 @@ def what_if_simulator(land_id: str, query: WhatIfQuery):
         "reason": scenario_data["reason"]
     }
 
-@app.get("/api/lands/{land_id}/verification-report")
-def get_verification_report(land_id: str):
-    land = next((l for l in DEMO_LAND_DATA if l["id"] == land_id), None)
+@app.get("/api/lands/{land_id:path}/verification-report")
+def get_verification_report(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    land = None
+    if DB_AVAILABLE:
+        try:
+            db_l = db.query(Land).filter(Land.id == canonical_id).first()
+            if db_l:
+                land = _land_to_dict(db_l)
+        except Exception:
+            pass
+    if not land:
+        land = next((l for l in DEMO_LAND_DATA if l["id"] == canonical_id), None)
     if not land:
         raise HTTPException(status_code=404, detail="Land not found")
         
-    owners = OWNERS_DATA.get(land_id, OWNERS_DATA["default"])
-    docs = DOCUMENTS_DATA.get(land_id, DOCUMENTS_DATA["default"])
-    doc_verif = DOC_VERIFICATION_DATA.get(land_id, DOC_VERIFICATION_DATA["default"])
-    cases = CASES_DATA.get(land_id, CASES_DATA["default"])
-    mortgages = MORTGAGES_DATA.get(land_id, MORTGAGES_DATA["default"])
-    boundary = BOUNDARY_DETECTION_DATA.get(land_id, BOUNDARY_DETECTION_DATA["default"])
-    frag = FRAGMENTATION_ANALYSIS_DATA.get(land_id, FRAGMENTATION_ANALYSIS_DATA["default"])
-    dna = DNA_DATA.get(land_id, DNA_DATA["default"])
-    risk = RISK_DATA.get(land_id, RISK_DATA["default"])
-    history = HISTORY_DATA.get(land_id, HISTORY_DATA["default"])
+    owners = OWNERS_DATA.get(canonical_id, OWNERS_DATA["default"])
+    docs = DOCUMENTS_DATA.get(canonical_id, DOCUMENTS_DATA["default"]).copy()
+    doc_verif = DOC_VERIFICATION_DATA.get(canonical_id, DOC_VERIFICATION_DATA["default"])
+    cases = CASES_DATA.get(canonical_id, CASES_DATA["default"])
+    mortgages = MORTGAGES_DATA.get(canonical_id, MORTGAGES_DATA["default"])
+    boundary = BOUNDARY_DETECTION_DATA.get(canonical_id, BOUNDARY_DETECTION_DATA["default"])
+    frag = FRAGMENTATION_ANALYSIS_DATA.get(canonical_id, FRAGMENTATION_ANALYSIS_DATA["default"])
+    dna = DNA_DATA.get(canonical_id, DNA_DATA["default"])
+    risk = RISK_DATA.get(canonical_id, RISK_DATA["default"])
+    history = HISTORY_DATA.get(canonical_id, HISTORY_DATA["default"])
     
-    # Regenerate docs natively avoiding returning just dict copies
-    docs = DOCUMENTS_DATA.get(land_id, DOCUMENTS_DATA["default"]).copy()
-    seller_docs = [v for k, v in SELLER_DOCUMENTS.items() if v["land_id"] == land_id]
-    for doc in seller_docs:
-        docs.append({
-            "is_uploaded": True,
-            "id": doc["id"],
-            "doc_no": doc["document_number"] or doc["id"][:8],
-            "document_name": doc["document_name"],
-            "type": doc["document_type"],
-            "date": doc["issue_date"] or doc["uploaded_at"][:10],
-            "verification": doc["verification_status"],
-            "result": "Pending Verification" if doc["verification_status"] == "Pending" else doc["verification_status"],
-            "file_path": doc["file_path"],
-            "notes": doc["notes"]
-        })
+    # Merge static docs with seller-uploaded docs from DB (ORM attribute access)
+    if DB_AVAILABLE:
+        try:
+            seller_docs = db.query(SellerDocumentUpload).filter(SellerDocumentUpload.land_id == canonical_id).all()
+            for doc in seller_docs:
+                docs.append({
+                    "is_uploaded": True,
+                    "id": doc.id,
+                    "doc_no": doc.document_number or doc.id[:8],
+                    "document_name": doc.document_name,
+                    "type": doc.document_type,
+                    "date": doc.issue_date or (doc.uploaded_at[:10] if doc.uploaded_at else ""),
+                    "verification": doc.verification_status,
+                    "result": "Pending Verification" if doc.verification_status == "Pending" else doc.verification_status,
+                    "file_path": doc.file_path,
+                    "notes": doc.notes
+                })
+        except Exception:
+            pass
 
     # Generate simple summary
-    summary = f"Based on synthetic records, {land_id} is a {land['area_sq_ft']} sq ft {land['land_type']} property owned by {land['owner']}. "
+    summary = f"Based on synthetic records, {canonical_id} is a {land['area_sq_ft']} sq ft {land['land_type']} property owned by {land['owner']}. "
     summary += f"The AI Risk level is {risk['level']} (score: {risk['overall_score']}). "
     
     if cases and len(cases) == 1: summary += "There is 1 active legal case on record. "
@@ -869,8 +1330,298 @@ def get_verification_report(land_id: str):
         "summary": summary
     }
 
+@app.get("/api/lands/{land_id:path}/risk-timeline")
+def get_risk_timeline(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    history = HISTORY_DATA.get(canonical_id, HISTORY_DATA["default"])
+    timeline = []
+    if not history:
+        return {"timeline": [], "trend": "Stable"}
+        
+    last_risk = history[-1]["risk_score"]
+    second_last = history[-2]["risk_score"] if len(history) > 1 else last_risk
+    future_diff = last_risk - second_last
+    future_risk = max(0, min(100, last_risk + future_diff))
+    
+    for h in history:
+        timeline.append({"year": h["year"], "risk_score": h["risk_score"]})
+        
+    timeline.append({"year": "Future", "risk_score": future_risk, "is_prediction": True})
+    
+    trend = "Stable"
+    if future_diff > 0: trend = "Increasing"
+    elif future_diff < 0: trend = "Decreasing"
+    
+    return {"timeline": timeline, "trend": trend}
+
+@app.get("/api/lands/{land_id:path}/alerts")
+@app.get("/lands/{land_id:path}/alerts")
+def get_alerts(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    if DB_AVAILABLE:
+        try:
+            db_alerts = db.query(Alert).filter(Alert.land_id == canonical_id).all()
+            if db_alerts:
+                return [{"type": a.type, "date": a.date, "severity": "High" if a.type in ["Legal Case", "Boundary Change"] else "Medium", "text": a.message} for a in db_alerts]
+        except Exception:
+            pass
+    alerts = []
+    risk = RISK_DATA.get(canonical_id, RISK_DATA["default"])
+    boundary = BOUNDARY_DETECTION_DATA.get(canonical_id, BOUNDARY_DETECTION_DATA["default"])
+    cases = CASES_DATA.get(canonical_id, CASES_DATA["default"])
+    doc_verif = DOC_VERIFICATION_DATA.get(canonical_id, DOC_VERIFICATION_DATA["default"])
+    
+    if boundary.get("change_status") == "Significant Change Detected":
+        alerts.append({"type": "Boundary Change", "date": datetime.now().strftime("%Y-%m-%d"), "severity": "High", "text": "Boundary mismatch detected."})
+    
+    if risk.get("level") == "HIGH":
+        alerts.append({"type": "Risk Level", "date": datetime.now().strftime("%Y-%m-%d"), "severity": "High", "text": "Overall risk level is High."})
+        
+    on_going_cases = [c for c in cases if c.get("status", "") == "Ongoing"]
+    if on_going_cases:
+        alerts.append({"type": "Legal Case", "date": datetime.now().strftime("%Y-%m-%d"), "severity": "High", "text": f"Found {len(on_going_cases)} active legal case(s)."})
+        
+    if doc_verif.get("overall_result") == "CONFLICT DETECTED":
+        alerts.append({"type": "Document Verification", "date": datetime.now().strftime("%Y-%m-%d"), "severity": "Medium", "text": "Document details do not match registry."})
+        
+    if not alerts:
+        alerts.append({"type": "General", "date": datetime.now().strftime("%Y-%m-%d"), "severity": "Low", "text": "No significant alerts at this time."})
+        
+    return alerts
+
+@app.post("/api/lands/{land_id:path}/document-scan")
+def document_scan(land_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    doc_verif = DOC_VERIFICATION_DATA.get(canonical_id, DOC_VERIFICATION_DATA["default"]).copy()
+    consistency_score = doc_verif.get("score", 75)
+    status = "REVIEW" if consistency_score < 70 else "CONSISTENT"
+        
+    return {
+        "status": "success",
+        "message": "Automated consistency screening – not legal authentication. (DEMO)",
+        "fields": doc_verif.get("fields", []),
+        "consistency_score": consistency_score,
+        "consistency_status": status,
+        "explanation": doc_verif.get("explanation", "")
+    }
+
+@app.get("/api/lands/{land_id:path}/environmental-risk")
+def environmental_risk(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    risk_level = "LOW"
+    score = 20
+    if canonical_id in ["LND-1002", "LND-1004"]:
+        risk_level = "HIGH"
+        score = 80
+    elif canonical_id in ["LND-1006", "LND-1007"]:
+        risk_level = "MEDIUM"
+        score = 50
+        
+    return {
+        "risk_level": risk_level,
+        "score": score,
+        "factors": [
+            {"factor": "Flood Risk", "impact": "High" if risk_level == "HIGH" else "Low"},
+            {"factor": "Water Availability", "impact": "Medium"},
+            {"factor": "Soil/Environmental concern", "impact": "Low"},
+            {"factor": "Nearby Water Body", "impact": "High" if canonical_id == "LND-1006" else "Low"}
+        ],
+        "disclaimer": "This is synthetic/demo environmental data."
+    }
+
+@app.get("/api/lands/{land_id:path}/nearby-facilities")
+def nearby_facilities(land_id: str):
+    return [
+        {"type": "School", "name": "Demo Public School", "distance_km": 1.5},
+        {"type": "Hospital", "name": "City Care Hospital", "distance_km": 3.0},
+        {"type": "Bank", "name": "State Bank", "distance_km": 0.8},
+        {"type": "Bus Stop", "name": "Main Road Stop", "distance_km": 0.3},
+        {"type": "Railway Station", "name": "Central Station", "distance_km": 5.0}
+    ]
+
+class ValueEstimateParams(BaseModel):
+    area: float
+    land_type: str
+    road_access: str
+    water_facility: str
+    electricity: str
+
+@app.post("/api/lands/{land_id:path}/value-estimate")
+def value_estimate(land_id: str, params: ValueEstimateParams):
+    base_rate = 1000
+    if params.land_type == "Commercial":
+        base_rate = 3000
+    elif params.land_type == "Agricultural":
+        base_rate = 500
+        
+    value = params.area * base_rate
+    if params.road_access == "Yes": value *= 1.2
+    if params.water_facility == "Yes": value *= 1.1
+    if params.electricity == "Yes": value *= 1.1
+    
+    return {
+        "estimated_value": value,
+        "factors": [
+            "Area",
+            "Land Type",
+            "Road Access",
+            "Electricity",
+            "Water Facility"
+        ],
+        "disclaimer": "This is a demo estimate for academic purposes and is not a professional property valuation."
+    }
+
+@app.get("/api/lands/{land_id:path}/qr-profile")
+def qr_profile(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    return {
+        "qr_data": f"https://demo.landtrace360.com/profile/{canonical_id}",
+        "land_id": canonical_id
+    }
+
+@app.get("/api/lands/{land_id:path}")
+@app.get("/lands/{land_id:path}")
+def get_land(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    if DB_AVAILABLE:
+        try:
+            db_land = db.query(Land).filter(
+                (Land.id == canonical_id) | (Land.survey_number == land_id)
+            ).first()
+            if db_land:
+                return _land_to_dict(db_land)
+        except Exception:
+            pass
+    for item in DEMO_LAND_DATA:
+        if item["id"] == canonical_id or item["survey_number"] == land_id or item["survey_number"].lower() == land_id.lower():
+            return item
+    raise HTTPException(status_code=404, detail="Land not found")
+
+@app.get("/api/loan-closure-verification/{doc_no:path}")
+def loan_closure_verification(doc_no: str, db: Session = Depends(get_db)):
+    """
+    Look up a document number → find the linked land → find mortgage/loan →
+    return loan status and verification result.
+    """
+    # 1. Search all DOCUMENTS_DATA for the doc_no
+    found_land_id = None
+    found_doc = None
+    for land_id, docs in DOCUMENTS_DATA.items():
+        if land_id == "default":
+            continue
+        for doc in docs:
+            if doc["doc_no"].upper() == doc_no.strip().upper():
+                found_land_id = land_id
+                found_doc = doc
+                break
+        if found_doc:
+            break
+
+    # Also check seller-uploaded documents (ORM attribute access)
+    if not found_doc and DB_AVAILABLE:
+        try:
+            for doc in db.query(SellerDocumentUpload).filter(SellerDocumentUpload.document_number == doc_no.strip()).all():
+                if (doc.document_number or "").upper() == doc_no.strip().upper():
+                    found_land_id = doc.land_id
+                    found_doc = {
+                        "doc_no": doc.document_number,
+                        "type": doc.document_type,
+                        "date": doc.issue_date or doc.uploaded_at[:10],
+                        "verification": doc.verification_status,
+                        "result": doc.verification_status
+                    }
+                    break
+        except Exception:
+            pass
+
+    if not found_doc:
+        return {
+            "found": False,
+            "document_number": doc_no,
+            "message": "Document number not found in project records.",
+            "disclaimer": "This verification is based on LandTrace360 project/demo records only. It is NOT real bank or government verification."
+        }
+
+    # 2. Get the land record
+    land = None
+    if DB_AVAILABLE:
+        try:
+            db_land = db.query(Land).filter(Land.id == found_land_id).first()
+            if db_land:
+                land = _land_to_dict(db_land)
+        except Exception:
+            pass
+    if not land:
+        land = next((l for l in DEMO_LAND_DATA if l["id"] == found_land_id), None)
+
+    # 3. Get the mortgage/loan record
+    mortgages = MORTGAGES_DATA.get(found_land_id, MORTGAGES_DATA.get("default", []))
+
+    # 4. Build result
+    result = {
+        "found": True,
+        "document_number": found_doc["doc_no"],
+        "document_type": found_doc["type"],
+        "document_date": found_doc.get("date", "N/A"),
+        "document_verification": found_doc.get("verification", "N/A"),
+        "land_id": found_land_id,
+        "survey_number": land["survey_number"] if land else "N/A",
+        "land_location": f"{land['location']}, {land['village']}, {land['district']}" if land else "N/A",
+        "land_owner": land["owner"] if land else "N/A",
+        "land_type": land["land_type"] if land else "N/A",
+        "disclaimer": "This verification is based on LandTrace360 project/demo records only. It is NOT real bank or government verification."
+    }
+
+    if not mortgages or len(mortgages) == 0:
+        result["loan_status"] = "NO LOAN RECORD FOUND"
+        result["loan_mortgage_id"] = None
+        result["bank_lender"] = None
+        result["loan_start_date"] = None
+        result["loan_end_date"] = None
+        result["closure_date"] = None
+        result["verification_result"] = "No loan information is available in the project records."
+    else:
+        m = mortgages[0]
+        result["bank_lender"] = m["bank"]
+        result["loan_start_date"] = m["start_date"]
+        result["loan_end_date"] = m["release_date"]
+        result["loan_mortgage_id"] = f"MTG-{found_land_id.replace('LND-', '')}-001"
+
+        if m["status"] == "Released":
+            result["loan_status"] = "COMPLETED"
+            result["closure_date"] = m["release_date"]
+            result["verification_result"] = "LOAN CLOSED — The mortgage/loan associated with this land has been fully completed and released."
+        elif m["status"] == "Active":
+            # Check if the release_date is in the past (overdue)
+            try:
+                from datetime import date as date_type
+                release = datetime.strptime(m["release_date"], "%Y-%m-%d").date()
+                today = datetime.now().date()
+                if release < today:
+                    result["loan_status"] = "OVERDUE"
+                    result["closure_date"] = None
+                    result["verification_result"] = "LOAN OVERDUE — The mortgage/loan has passed its expected release date but has not been marked as released."
+                else:
+                    result["loan_status"] = "ACTIVE"
+                    result["closure_date"] = None
+                    result["verification_result"] = "LOAN NOT YET COMPLETED — The mortgage/loan is currently active and has not been released."
+            except Exception:
+                result["loan_status"] = "ACTIVE"
+                result["closure_date"] = None
+                result["verification_result"] = "LOAN NOT YET COMPLETED — The mortgage/loan is currently active and has not been released."
+        else:
+            result["loan_status"] = m["status"].upper()
+            result["closure_date"] = None
+            result["verification_result"] = f"Loan status is {m['status']}."
+
+    return result
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+
+
 

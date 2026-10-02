@@ -8,9 +8,10 @@ const SearchPage = () => {
     const [query, setQuery] = useState('');
     const [loading, setLoading] = useState(false);
 
-    const handleSearch = () => {
+    const fetchSearch = (searchQuery) => {
+        const q = searchQuery.trim();
         setLoading(true);
-        fetch(`${API_BASE}/api/search?q=${query}`)
+        fetch(`${API_BASE}/api/search?q=${q}`)
             .then(res => res.json())
             .then(data => {
                 setResults(data);
@@ -22,10 +23,27 @@ const SearchPage = () => {
             });
     };
 
-    // Initial load
+    // Keep handleSearch for explicit button clicks & Enter keys
+    const handleSearch = () => {
+        fetchSearch(query);
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Enter') {
+            handleSearch();
+        }
+    };
+
+    // Trigger search whenever the query changes (auto-filter as requested)
     useEffect(() => {
-        handleSearch();
-    }, []);
+        // Adding a slight debounce-like timeout is best practice, but 
+        // a direct call satisfies the request. We use a small timeout to avoid immediate spam.
+        const timer = setTimeout(() => {
+            fetchSearch(query);
+        }, 150);
+
+        return () => clearTimeout(timer);
+    }, [query]);
 
     return (
         <div>
@@ -36,6 +54,7 @@ const SearchPage = () => {
                     placeholder="Search by ID, Survey Number, Location, Owner..."
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={handleKeyDown}
                     style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
                 />
                 <button className="btn-primary" onClick={handleSearch} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -58,7 +77,7 @@ const SearchPage = () => {
                             </Link>
                         </div>
                     ))}
-                    {results.length === 0 && <p>No lands found matching your search.</p>}
+                    {!loading && results.length === 0 && <p style={{ fontSize: '1.2rem', color: 'var(--danger)', fontWeight: 'bold' }}>Land not found</p>}
                 </div>
             )}
         </div>

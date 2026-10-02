@@ -1,4 +1,5 @@
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { useState } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, LayersControl, Polygon } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -11,17 +12,41 @@ L.Icon.Default.mergeOptions({
 });
 
 const LandMap = ({ coordinates, popupText, lands }) => {
-    // Legacy single coordinate
+    // Basic pseudo polygon around coordinates if available
+    const getDemoPolygon = (coords) => {
+        if (!coords) return [];
+        const offset = 0.005;
+        return [
+            [coords[0] - offset, coords[1] - offset],
+            [coords[0] - offset, coords[1] + offset],
+            [coords[0] + offset, coords[1] + offset],
+            [coords[0] + offset, coords[1] - offset]
+        ];
+    };
+
     if (coordinates && coordinates.length === 2 && !lands) {
         return (
             <MapContainer center={coordinates} zoom={13} style={{ height: '100%', width: '100%', borderRadius: '8px', zIndex: 1 }}>
-                <TileLayer
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                />
+                <LayersControl position="topright">
+                    <LayersControl.BaseLayer checked name="Normal Map">
+                        <TileLayer
+                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                        />
+                    </LayersControl.BaseLayer>
+                    <LayersControl.BaseLayer name="Satellite View">
+                        <TileLayer
+                            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                            attribution='Tiles &copy; Esri'
+                        />
+                    </LayersControl.BaseLayer>
+                </LayersControl>
                 <Marker position={coordinates}>
                     <Popup>{popupText}</Popup>
                 </Marker>
+                <Polygon positions={getDemoPolygon(coordinates)} color="var(--accent-color)" fillColor="var(--accent-color)" fillOpacity={0.2} weight={2}>
+                    <Popup>Demo Land Boundary</Popup>
+                </Polygon>
             </MapContainer>
         );
     }
@@ -31,10 +56,20 @@ const LandMap = ({ coordinates, popupText, lands }) => {
         const center = lands[0].coordinates;
         return (
             <MapContainer center={center} zoom={5} style={{ height: '100%', width: '100%', borderRadius: '8px', zIndex: 1 }}>
-                <TileLayer
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                />
+                <LayersControl position="topright">
+                    <LayersControl.BaseLayer checked name="Normal Map">
+                        <TileLayer
+                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                        />
+                    </LayersControl.BaseLayer>
+                    <LayersControl.BaseLayer name="Satellite View">
+                        <TileLayer
+                            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                            attribution='Tiles &copy; Esri'
+                        />
+                    </LayersControl.BaseLayer>
+                </LayersControl>
                 {lands.map((land, idx) => land.coordinates ? (
                     <Marker key={land.id || idx} position={land.coordinates}>
                         <Popup>

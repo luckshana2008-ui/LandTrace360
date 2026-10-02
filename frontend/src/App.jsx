@@ -9,6 +9,7 @@ import LandProfileWrapper from './pages/LandProfileWrapper';
 import Alerts from './pages/Alerts';
 import HighRiskLands from './pages/HighRiskLands';
 import VerificationReport from './pages/VerificationReport';
+import LoanClosureVerification from './pages/LoanClosureVerification';
 import './App.css';
 
 function App() {
@@ -24,6 +25,7 @@ function App() {
           <Route path="alerts" element={<Alerts />} />
           <Route path="high-risk" element={<HighRiskLands />} />
           <Route path="report" element={<VerificationReport />} />
+          <Route path="loan-closure" element={<LoanClosureVerification />} />
           <Route path="land/:id" element={<LandProfileWrapper />} />
         </Route>
       </Routes>

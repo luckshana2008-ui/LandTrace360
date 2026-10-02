@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { PlusCircle, FileText, Trash2, Edit2, Download, Eye, AlertCircle } from 'lucide-react';
 import API_BASE from '../api';
 
-const SellerDocumentManager = ({ landId }) => {
+const SellerDocumentManager = ({ landId, onDocumentsChange }) => {
     const [documents, setDocuments] = useState([]);
     const [loading, setLoading] = useState(false);
     const [showForm, setShowForm] = useState(false);
@@ -37,6 +37,9 @@ const SellerDocumentManager = ({ landId }) => {
             // Filter only uploaded by seller, or render all and conditionally allow edit
             // For seller management, we show all, but can only manage 'is_uploaded'
             setDocuments(data);
+            if (onDocumentsChange) {
+                onDocumentsChange(data);
+            }
             setLoading(false);
         } catch (err) {
             console.error(err);
@@ -178,6 +181,24 @@ const SellerDocumentManager = ({ landId }) => {
         }
     };
 
+    const handleVerify = async (docId) => {
+        try {
+            setLoading(true);
+            const response = await fetch(`${API_BASE}/api/documents/${docId}/verify`, { method: 'POST' });
+            if (response.ok) {
+                setSuccess('Document verified successfully (Demo).');
+                fetchDocuments();
+            } else {
+                setError('Failed to verify document.');
+            }
+        } catch (err) {
+            console.error(err);
+            setError('An error occurred while verifying.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const getStatusBadgeClass = (status) => {
         if (!status) return 'status-badge status-info';
         const s = status.toLowerCase();
@@ -281,6 +302,11 @@ const SellerDocumentManager = ({ landId }) => {
                             )}
                             {doc.is_uploaded && (
                                 <>
+                                    {doc.verification === 'Pending' && (
+                                        <button type="button" onClick={() => handleVerify(doc.id)} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0.4rem 0.75rem', background: 'rgba(46, 204, 113, 0.2)', color: 'var(--success)', borderRadius: '4px', fontSize: '0.8rem', border: 'none', cursor: 'pointer' }}>
+                                            Verify
+                                        </button>
+                                    )}
                                     <button type="button" onClick={() => openForm(doc)} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0.4rem 0.75rem', background: 'rgba(var(--accent-rgb), 0.2)', color: 'var(--accent-color)', borderRadius: '4px', fontSize: '0.8rem', border: 'none', cursor: 'pointer' }}>
                                         <Edit2 size={14} /> Update
                                     </button>

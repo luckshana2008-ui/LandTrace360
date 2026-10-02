@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
     Search, MapPin, Tag, ArrowRight, SlidersHorizontal,
     CheckCircle, Clock, X, LayoutGrid, Map as MapIcon,
-    Maximize2, IndianRupee, ChevronDown, ChevronUp, Building2
+    Maximize2, IndianRupee, ChevronDown, ChevronUp, Building2, User
 } from 'lucide-react';
 import API_BASE from '../api';
 
@@ -65,29 +65,76 @@ function LandTypeIcon({ type }) {
 const AvailableLands = () => {
     const [filters, setFilters] = useState(DEFAULT_FILTERS);
     const [applied, setApplied] = useState(DEFAULT_FILTERS);
+    const [allLands, setAllLands] = useState([]);
     const [lands, setLands] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [view, setView] = useState('grid'); // 'grid' | 'map'
+    const [view, setView] = useState('grid');
     const [showFilters, setShowFilters] = useState(false);
     const [mapReady, setMapReady] = useState(false);
 
-    const buildQuery = (f) => {
-        const params = new URLSearchParams();
-        Object.entries(f).forEach(([k, v]) => { if (v !== '') params.set(k, v); });
-        return params.toString();
-    };
-
-    const fetchLands = useCallback((f) => {
+    const fetchLands = useCallback(() => {
         setLoading(true);
-        const qs = buildQuery(f);
-        fetch(`${API_BASE}/api/lands/available${qs ? '?' + qs : ''}`)
+        fetch(`${API_BASE}/api/lands/for-sale`)
             .then(res => res.json())
-            .then(data => { setLands(Array.isArray(data) ? data : []); setLoading(false); })
-            .catch(() => { setLands([]); setLoading(false); });
+            .then(data => {
+                const results = Array.isArray(data) ? data : [];
+                setAllLands(results);
+                applyFilters(results, DEFAULT_FILTERS);
+                setLoading(false);
+            })
+            .catch(() => {
+                setAllLands([]);
+                setLands([]);
+                setLoading(false);
+            });
     }, []);
 
-    // Initial load — all available lands
-    useEffect(() => { fetchLands(DEFAULT_FILTERS); }, [fetchLands]);
+    const applyFilters = (data, f) => {
+        let filtered = [...data];
+        if (f.location) {
+            const q = f.location.toLowerCase();
+            filtered = filtered.filter(l =>
+                (l.location || '').toLowerCase().includes(q) ||
+                (l.village || '').toLowerCase().includes(q) ||
+                (l.taluk || '').toLowerCase().includes(q) ||
+                (l.district || '').toLowerCase().includes(q)
+            );
+        }
+        if (f.district) {
+            const q = f.district.toLowerCase();
+            filtered = filtered.filter(l => (l.district || '').toLowerCase().includes(q));
+        }
+        if (f.city) {
+            const q = f.city.toLowerCase();
+            filtered = filtered.filter(l => (l.taluk || '').toLowerCase().includes(q) || (l.location || '').toLowerCase().includes(q));
+        }
+        if (f.village) {
+            const q = f.village.toLowerCase();
+            filtered = filtered.filter(l => (l.village || '').toLowerCase().includes(q));
+        }
+        if (f.land_type) {
+            filtered = filtered.filter(l => l.land_type === f.land_type);
+        }
+        if (f.min_price) {
+            filtered = filtered.filter(l => (l.asking_price || 0) >= parseInt(f.min_price));
+        }
+        if (f.max_price) {
+            filtered = filtered.filter(l => (l.asking_price || Number.MAX_SAFE_INTEGER) <= parseInt(f.max_price));
+        }
+        if (f.min_area) {
+            filtered = filtered.filter(l => (l.area_sq_ft || 0) >= parseInt(f.min_area));
+        }
+        if (f.max_area) {
+            filtered = filtered.filter(l => (l.area_sq_ft || Number.MAX_SAFE_INTEGER) <= parseInt(f.max_area));
+        }
+        if (f.verification_status) {
+            filtered = filtered.filter(l => l.status === f.verification_status);
+        }
+        setLands(filtered);
+    };
+
+    // Initial load
+    useEffect(() => { fetchLands(); }, [fetchLands]);
 
     // Delay map activation to allow leaflet CSS to settle
     useEffect(() => {
@@ -103,13 +150,13 @@ const AvailableLands = () => {
     const handleSearch = (e) => {
         e.preventDefault();
         setApplied(filters);
-        fetchLands(filters);
+        applyFilters(allLands, filters);
     };
 
     const handleClear = () => {
         setFilters(DEFAULT_FILTERS);
         setApplied(DEFAULT_FILTERS);
-        fetchLands(DEFAULT_FILTERS);
+        applyFilters(allLands, DEFAULT_FILTERS);
     };
 
     const hasActiveFilters = Object.values(applied).some(v => v !== '');
@@ -428,6 +475,24 @@ const AvailableLands = () => {
                                         </span>
                                     </div>
                                 )}
+
+                                {/* Owner */}
+                                {land.owner && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <User size={13} color="var(--text-secondary)" style={{ flexShrink: 0 }} />
+                                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                            Owner: {land.owner}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {/* Document Verification Status */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.2rem' }}>
+                                    <CheckCircle size={13} color="var(--success)" style={{ flexShrink: 0 }} />
+                                    <span style={{ fontSize: '0.8rem', color: 'var(--success)', fontWeight: 600 }}>
+                                        {land.is_new_announcement ? 'Document Verified' : 'Demo Document Verified'}
+                                    </span>
+                                </div>
                             </div>
 
                             {/* Card Footer */}

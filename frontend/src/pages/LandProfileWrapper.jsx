@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Save, Map as MapIcon, Database, Activity, MessagesSquare, FileText, Scale, Target } from 'lucide-react';
+import { ArrowLeft, Save, Map as MapIcon, Database, Activity, MessagesSquare, FileText, Scale, Target, Camera } from 'lucide-react';
 import LandMap from '../components/LandMap';
 import AIAssistant from '../components/AIAssistant';
 import LandDNA from '../components/LandDNA';
@@ -11,6 +11,13 @@ import DocumentVerification from '../components/DocumentVerification';
 import FragmentationDetector from '../components/FragmentationDetector';
 import WhatIfSimulator from '../components/WhatIfSimulator';
 import VerificationReport from '../components/VerificationReport';
+import RiskTimeline from '../components/RiskTimeline';
+import DocumentScanner from '../components/DocumentScanner';
+import EnvironmentalRisk from '../components/EnvironmentalRisk';
+import NearbyFacilities from '../components/NearbyFacilities';
+import LandValueEstimator from '../components/LandValueEstimator';
+import QRProfile from '../components/QRProfile';
+import LoanClosureCard from '../components/LoanClosureCard';
 import API_BASE from '../api';
 
 const LandProfileWrapper = () => {
@@ -224,8 +231,10 @@ const LandProfileWrapper = () => {
                                         📌 Approx. coordinates: {land.coordinates[0].toFixed(4)}°N, {land.coordinates[1].toFixed(4)}°E
                                     </p>
                                 )}
+                                <QRProfile landId={land.id} surveyNumber={land.survey_number} />
                             </div>
                         </div>
+                        <NearbyFacilities landId={land.id} />
                     </div>
                 )}
 
@@ -239,6 +248,7 @@ const LandProfileWrapper = () => {
 
                 {activeTab === 'legal' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+                        <DocumentScanner landId={land.id} />
                         <DocumentVerification landId={land.id} />
                         <div className="grid-cards" style={{ gridTemplateColumns: '1fr 1fr' }}>
                             <div className="glass-panel">
@@ -279,6 +289,7 @@ const LandProfileWrapper = () => {
                                 ))}
                             </div>
                         </div>
+                        <LoanClosureCard landId={land.id} />
                         <RelationshipGraph land={land} owners={owners} docs={docs} cases={cases} mortgages={mortgages} />
                     </div>
                 )}
@@ -286,6 +297,9 @@ const LandProfileWrapper = () => {
                 {activeTab === 'dna' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
                         <LandDNA dna={dna} risk={risk} />
+                        <RiskTimeline landId={land.id} />
+                        <EnvironmentalRisk landId={land.id} />
+                        <LandValueEstimator land={land} landId={land.id} />
                         <FragmentationDetector landId={land.id} />
                         <WhatIfSimulator landId={land.id} />
                     </div>
