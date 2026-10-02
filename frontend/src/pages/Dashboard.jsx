@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Target, CheckCircle, ShoppingCart, AlertTriangle, Bell, FileText, Activity, TrendingUp } from 'lucide-react';
+import { Target, CheckCircle, ShoppingCart, AlertTriangle, Bell, FileText, Activity, TrendingUp, Shield, Sparkles, ArrowRight, Bot, ShieldAlert, Layers, Compass } from 'lucide-react';
 import '../index.css';
 import API_BASE from '../api';
+import { useLanguage } from '../i18n/LanguageContext';
 
 const Dashboard = () => {
+    const { t } = useLanguage();
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
     const [globalAlerts, setGlobalAlerts] = useState([]);
@@ -31,12 +33,274 @@ const Dashboard = () => {
         ]);
     }, []);
 
-    if (loading) return <div className="page-title">Loading Dashboard...</div>;
-    if (!stats) return <div className="page-title">Error loading data.</div>;
+    if (loading) return <div className="page-title">{t('common.loading', 'Loading Dashboard...')}</div>;
+    if (!stats) return <div className="page-title">{t('common.error', 'Error loading data.')}</div>;
 
     return (
-        <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-            <h1 className="page-title">Dashboard Overview</h1>
+        <div style={{ maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                    <h1 className="page-title" style={{ margin: 0 }}>{t('dashboard.title', 'Dashboard Overview')}</h1>
+                    <p style={{ margin: '0.25rem 0 0 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                        {t('dashboard.welcome', 'Transparent Land Registry & Risk Assessment Intelligence')}
+                    </p>
+                </div>
+            </div>
+
+            {/* Land Intelligence Section — 6 Unified Intelligence Engines */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Compass size={20} color="#38bdf8" />
+                        <h2 style={{ margin: 0, fontSize: '1.2rem', color: '#38bdf8', letterSpacing: '0.04em', textTransform: 'uppercase', fontWeight: 700 }}>
+                            {t('nav.landIntelligence', 'Land Intelligence')}
+                        </h2>
+                    </div>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        6 Specialized Engines Powered by Verified Project Records
+                    </span>
+                </div>
+
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                    gap: '1.25rem'
+                }}>
+                    {/* 1. Land Passport */}
+                    <div
+                        onClick={() => navigate('/passport')}
+                        className="glass-panel"
+                        style={{
+                            padding: '1.5rem',
+                            cursor: 'pointer',
+                            border: '1px solid rgba(56, 189, 248, 0.3)',
+                            background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(56, 189, 248, 0.1))',
+                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            gap: '1rem'
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 12px 30px rgba(56, 189, 248, 0.2)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                            <div style={{ background: 'rgba(56, 189, 248, 0.2)', padding: '0.75rem', borderRadius: '12px' }}>
+                                <Shield size={26} color="#38bdf8" />
+                            </div>
+                            <div>
+                                <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', color: '#38bdf8', textTransform: 'uppercase' }}>
+                                    CREDENTIAL
+                                </span>
+                                <h3 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--text-primary)' }}>
+                                    {t('passport.title', 'Land Passport')}
+                                </h3>
+                            </div>
+                        </div>
+                        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                            {t('passport.subtitle', 'Unified digital property credential derived dynamically from project records with View, Download, and Print.')}
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#38bdf8', fontSize: '0.875rem', fontWeight: 600 }}>
+                            {t('passport.viewAction', 'View Land Passport')} <ArrowRight size={16} />
+                        </div>
+                    </div>
+
+                    {/* 2. AI Land Story */}
+                    <div
+                        onClick={() => navigate('/story')}
+                        className="glass-panel"
+                        style={{
+                            padding: '1.5rem',
+                            cursor: 'pointer',
+                            border: '1px solid rgba(192, 132, 252, 0.3)',
+                            background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(168, 85, 247, 0.1))',
+                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            gap: '1rem'
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 12px 30px rgba(168, 85, 247, 0.2)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                            <div style={{ background: 'rgba(168, 85, 247, 0.2)', padding: '0.75rem', borderRadius: '12px' }}>
+                                <Sparkles size={26} color="#c084fc" />
+                            </div>
+                            <div>
+                                <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', color: '#c084fc', textTransform: 'uppercase' }}>
+                                    NARRATIVE
+                                </span>
+                                <h3 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--text-primary)' }}>
+                                    {t('story.title', 'AI Land Story')}
+                                </h3>
+                            </div>
+                        </div>
+                        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                            {t('story.subtitle', 'Chronological narrative generated from stored ownership, legal, mortgage, and survey records with evidence tracking.')}
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#c084fc', fontSize: '0.875rem', fontWeight: 600 }}>
+                            {t('story.generateButton', 'Generate Story')} <ArrowRight size={16} />
+                        </div>
+                    </div>
+
+                    {/* 3. Anomaly Detective */}
+                    <div
+                        onClick={() => navigate('/anomalies')}
+                        className="glass-panel"
+                        style={{
+                            padding: '1.5rem',
+                            cursor: 'pointer',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(239, 68, 68, 0.1))',
+                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            gap: '1rem'
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 12px 30px rgba(239, 68, 68, 0.2)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                            <div style={{ background: 'rgba(239, 68, 68, 0.2)', padding: '0.75rem', borderRadius: '12px' }}>
+                                <ShieldAlert size={26} color="#ef4444" />
+                            </div>
+                            <div>
+                                <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', color: '#ef4444', textTransform: 'uppercase' }}>
+                                    DETECTION
+                                </span>
+                                <h3 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--text-primary)' }}>
+                                    {t('anomalies.title', 'Anomaly Detective')}
+                                </h3>
+                            </div>
+                        </div>
+                        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                            Identify area discrepancies, rapid ownership flips, mortgage overlaps, and active litigation flags across land archives.
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#ef4444', fontSize: '0.875rem', fontWeight: 600 }}>
+                            {t('common.view', 'Detect Anomalies')} <ArrowRight size={16} />
+                        </div>
+                    </div>
+
+                    {/* 4. Evidence Explorer */}
+                    <div
+                        onClick={() => navigate('/evidence')}
+                        className="glass-panel"
+                        style={{
+                            padding: '1.5rem',
+                            cursor: 'pointer',
+                            border: '1px solid rgba(52, 211, 153, 0.3)',
+                            background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(52, 211, 153, 0.1))',
+                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            gap: '1rem'
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 12px 30px rgba(52, 211, 153, 0.2)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                            <div style={{ background: 'rgba(52, 211, 153, 0.2)', padding: '0.75rem', borderRadius: '12px' }}>
+                                <Layers size={26} color="#34d399" />
+                            </div>
+                            <div>
+                                <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', color: '#34d399', textTransform: 'uppercase' }}>
+                                    AUDIT TRAIL
+                                </span>
+                                <h3 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--text-primary)' }}>
+                                    {t('evidenceExplorer.title', 'Evidence Explorer')}
+                                </h3>
+                            </div>
+                        </div>
+                        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                            Hierarchical audit trail connecting high-level conclusions and risk ratings to verified underlying database records.
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#34d399', fontSize: '0.875rem', fontWeight: 600 }}>
+                            {t('common.view', 'Explore Evidence')} <ArrowRight size={16} />
+                        </div>
+                    </div>
+
+                    {/* 5. Risk Breakdown */}
+                    <div
+                        onClick={() => navigate('/risk-breakdown')}
+                        className="glass-panel"
+                        style={{
+                            padding: '1.5rem',
+                            cursor: 'pointer',
+                            border: '1px solid rgba(251, 191, 36, 0.3)',
+                            background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(245, 158, 11, 0.1))',
+                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            gap: '1rem'
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 12px 30px rgba(251, 191, 36, 0.2)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                            <div style={{ background: 'rgba(251, 191, 36, 0.2)', padding: '0.75rem', borderRadius: '12px' }}>
+                                <Activity size={26} color="#fbbf24" />
+                            </div>
+                            <div>
+                                <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', color: '#fbbf24', textTransform: 'uppercase' }}>
+                                    ANALYTICS
+                                </span>
+                                <h3 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--text-primary)' }}>
+                                    {t('nav.riskBreakdown', 'Risk Breakdown')}
+                                </h3>
+                            </div>
+                        </div>
+                        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                            Multi-factor scoring across legal disputes, unreleased mortgages, document flags, and boundary discrepancies.
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#fbbf24', fontSize: '0.875rem', fontWeight: 600 }}>
+                            {t('common.view', 'View Breakdown')} <ArrowRight size={16} />
+                        </div>
+                    </div>
+
+                    {/* 6. LandTrace AI */}
+                    <div
+                        onClick={() => navigate('/chat')}
+                        className="glass-panel"
+                        style={{
+                            padding: '1.5rem',
+                            cursor: 'pointer',
+                            border: '1px solid rgba(56, 189, 248, 0.35)',
+                            background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(37, 99, 235, 0.15))',
+                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            gap: '1rem'
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 12px 30px rgba(56, 189, 248, 0.25)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                            <div style={{ background: 'rgba(56, 189, 248, 0.2)', padding: '0.75rem', borderRadius: '12px' }}>
+                                <Bot size={26} color="#38bdf8" />
+                            </div>
+                            <div>
+                                <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', color: '#38bdf8', textTransform: 'uppercase' }}>
+                                    INTELLIGENT AI
+                                </span>
+                                <h3 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--text-primary)' }}>
+                                    {t('chatbot.title', 'LandTrace AI')}
+                                </h3>
+                            </div>
+                        </div>
+                        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                            {t('chatbot.subtitle', 'Evidence-Based Intelligent Land Assistant')} — Interactive Q&A for parcel records, dockets, and risk evaluation.
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#38bdf8', fontSize: '0.875rem', fontWeight: 600 }}>
+                            {t('chatbot.askAI', 'Ask LandTrace AI')} <ArrowRight size={16} />
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <div className="grid-cards" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))' }}>
                 <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>

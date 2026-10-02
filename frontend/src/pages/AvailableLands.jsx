@@ -6,6 +6,7 @@ import {
     Maximize2, IndianRupee, ChevronDown, ChevronUp, Building2, User
 } from 'lucide-react';
 import API_BASE from '../api';
+import { useLanguage } from '../i18n/LanguageContext';
 
 // Lazy-load map to avoid SSR issues with leaflet
 const LandMap = lazy(() => import('../components/LandMap'));
@@ -63,6 +64,7 @@ function LandTypeIcon({ type }) {
 }
 
 const AvailableLands = () => {
+    const { t } = useLanguage();
     const [filters, setFilters] = useState(DEFAULT_FILTERS);
     const [applied, setApplied] = useState(DEFAULT_FILTERS);
     const [allLands, setAllLands] = useState([]);
@@ -167,10 +169,10 @@ const AvailableLands = () => {
             {/* ── Page Header ── */}
             <div style={{ marginBottom: '1.5rem' }}>
                 <h1 className="page-title" style={{ marginBottom: '0.25rem' }}>
-                    🏡 Available Lands Marketplace
+                    🏡 {t('marketplace.title', 'Available Lands Marketplace')}
                 </h1>
                 <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
-                    Browse and filter verified land listings available for purchase across India.
+                    {t('marketplace.subtitle', 'Browse and filter verified land listings available for purchase across India.')}
                 </p>
             </div>
 
@@ -186,7 +188,7 @@ const AvailableLands = () => {
                                 name="location"
                                 value={filters.location}
                                 onChange={handleChange}
-                                placeholder="Search by location, city, district…"
+                                placeholder={t('marketplace.searchPlaceholder', 'Search location, district, or survey no...')}
                                 style={{
                                     width: '100%', padding: '0.75rem 0.75rem 0.75rem 2.25rem',
                                     borderRadius: '8px', border: '1px solid var(--border-color)',
@@ -197,7 +199,7 @@ const AvailableLands = () => {
 
                         <button type="submit" className="btn-primary"
                             style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1.25rem', whiteSpace: 'nowrap' }}>
-                            <Search size={18} /> Search
+                            <Search size={18} /> {t('marketplace.searchBtn', 'Search')}
                         </button>
 
                         <button type="button"
@@ -211,7 +213,7 @@ const AvailableLands = () => {
                                 cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '0.9rem'
                             }}>
                             <SlidersHorizontal size={16} />
-                            Filters
+                            {t('marketplace.filtersBtn', 'Filters')}
                             {showFilters ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                         </button>
 
@@ -224,7 +226,7 @@ const AvailableLands = () => {
                                     background: 'rgba(239,68,68,0.1)', color: 'var(--danger)',
                                     cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '0.9rem'
                                 }}>
-                                <X size={15} /> Clear Filters
+                                <X size={15} /> {t('marketplace.clearFilters', 'Clear Filters')}
                             </button>
                         )}
                     </div>
@@ -507,7 +509,7 @@ const AvailableLands = () => {
                                     }}
                                     onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-hover)'}
                                     onMouseLeave={e => e.currentTarget.style.background = 'var(--accent-color)'}>
-                                    View Details <ArrowRight size={16} />
+                                    {t('marketplace.viewProfile', 'View Details')} <ArrowRight size={16} />
                                 </Link>
                             </div>
                         </div>

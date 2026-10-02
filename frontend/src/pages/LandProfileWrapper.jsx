@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Save, Map as MapIcon, Database, Activity, MessagesSquare, FileText, Scale, Target, Camera } from 'lucide-react';
+import { ArrowLeft, Save, Map as MapIcon, Database, Activity, MessagesSquare, FileText, Scale, Target, Camera, Shield, Sparkles, ShieldAlert, Layers, Bot } from 'lucide-react';
 import LandMap from '../components/LandMap';
 import AIAssistant from '../components/AIAssistant';
 import LandDNA from '../components/LandDNA';
@@ -18,9 +18,16 @@ import NearbyFacilities from '../components/NearbyFacilities';
 import LandValueEstimator from '../components/LandValueEstimator';
 import QRProfile from '../components/QRProfile';
 import LoanClosureCard from '../components/LoanClosureCard';
+import LandPassport from '../components/LandPassport';
+import AILandStory from '../components/AILandStory';
+import AnomalyDetective from '../components/AnomalyDetective';
+import EvidenceExplorer from '../components/EvidenceExplorer';
+import RiskBreakdown from '../components/RiskBreakdown';
 import API_BASE from '../api';
+import { useLanguage } from '../i18n/LanguageContext';
 
 const LandProfileWrapper = () => {
+    const { t } = useLanguage();
     const { id } = useParams();
     const [activeTab, setActiveTab] = useState('overview');
     const [data, setData] = useState({
@@ -79,6 +86,26 @@ const LandProfileWrapper = () => {
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <VerificationReport landId={land.id} />
+                    <button
+                        onClick={() => setActiveTab('ai')}
+                        className="btn-secondary"
+                        style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            padding: '0.75rem 1.25rem',
+                            alignSelf: 'center',
+                            marginTop: '1.5rem',
+                            background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(37, 99, 235, 0.2))',
+                            border: '1px solid rgba(56, 189, 248, 0.4)',
+                            color: '#38bdf8',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                        }}
+                    >
+                        <Bot size={18} />
+                        <span>Ask LandTrace AI</span>
+                    </button>
                     <button onClick={toggleSave} className="btn-primary" style={{ background: saved ? 'var(--success)' : 'var(--accent-color)', height: 'fit-content', padding: '0.75rem 1.5rem', alignSelf: 'center', marginTop: '1.5rem' }}>
                         <Save size={18} style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} />
                         {saved ? 'Saved' : 'Save Land'}
@@ -86,15 +113,14 @@ const LandProfileWrapper = () => {
                 </div>
             </div>
 
-            {/* Tabs */}
-            <div className="tabs-container" style={{ marginBottom: '2rem', borderBottom: '1px solid var(--border-color)' }}>
+            <div className="tabs-container" style={{ marginBottom: '2rem', borderBottom: '1px solid var(--border-color)', display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
+                {/* ── 5 Core Profile Tabs (as requested by user sitemap) ── */}
                 {[
-                    { id: 'overview', icon: MapIcon, label: 'Overview & Map' },
-                    { id: 'history', icon: Database, label: 'History & Time Machine' },
-                    { id: 'boundary', icon: Target, label: 'Boundary Detection' },
-                    { id: 'legal', icon: Scale, label: 'Legal & Documents' },
-                    { id: 'dna', icon: Activity, label: 'DNA & Risk Analysis' },
-                    { id: 'ai', icon: MessagesSquare, label: 'AI Assistant' }
+                    { id: 'overview', icon: MapIcon, label: t('profile.tabs.overview', 'Overview & Map') },
+                    { id: 'history', icon: Database, label: t('profile.tabs.history', 'History & Time Machine') },
+                    { id: 'legal', icon: Scale, label: t('profile.tabs.legal', 'Legal & Documents') },
+                    { id: 'dna', icon: Activity, label: t('profile.tabs.dna', 'DNA & Risk Analysis') },
+                    { id: 'ai', icon: Bot, label: t('nav.landTraceAI', 'LandTrace AI') }
                 ].map(tab => (
                     <button
                         key={tab.id}
@@ -102,10 +128,35 @@ const LandProfileWrapper = () => {
                         style={{
                             background: activeTab === tab.id ? 'var(--accent-light)' : 'transparent',
                             color: activeTab === tab.id ? 'var(--accent-color)' : 'var(--text-secondary)',
-                            border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '500'
+                            border: activeTab === tab.id ? '1px solid var(--accent-color)' : '1px solid transparent',
+                            padding: '0.5rem 1rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '600'
                         }}
                     >
                         <tab.icon size={18} /> {tab.label}
+                    </button>
+                ))}
+
+                <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 0.4rem' }} className="mobile-hide" />
+
+                {/* ── Specialized Land Intelligence Views ── */}
+                {[
+                    { id: 'passport', icon: Shield, label: t('profile.tabs.passport', 'Land Passport'), color: '#38bdf8' },
+                    { id: 'story', icon: Sparkles, label: t('profile.tabs.story', 'AI Land Story'), color: '#c084fc' },
+                    { id: 'anomalies', icon: ShieldAlert, label: t('profile.tabs.anomalies', 'Anomaly Detective'), color: '#ef4444' },
+                    { id: 'evidence', icon: Layers, label: t('profile.tabs.evidence', 'Evidence Explorer'), color: '#34d399' },
+                    { id: 'boundary', icon: Target, label: t('profile.tabs.boundary', 'Boundary Detection'), color: '#fbbf24' }
+                ].map(tab => (
+                    <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        style={{
+                            background: activeTab === tab.id ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                            color: activeTab === tab.id ? (tab.color || 'var(--accent-color)') : 'var(--text-secondary)',
+                            border: activeTab === tab.id ? `1px solid ${tab.color || 'var(--accent-color)'}` : '1px solid transparent',
+                            padding: '0.45rem 0.85rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '500', fontSize: '0.875rem'
+                        }}
+                    >
+                        <tab.icon size={16} color={activeTab === tab.id ? tab.color : undefined} /> {tab.label}
                     </button>
                 ))}
             </div>
@@ -113,6 +164,141 @@ const LandProfileWrapper = () => {
             <div className="tab-content">
                 {activeTab === 'overview' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
+                        {/* ── Land Intelligence 2.0 Quick Actions: Passport & AI Story ── */}
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                            gap: '1rem',
+                        }}>
+                            <div
+                                onClick={() => setActiveTab('passport')}
+                                style={{
+                                    background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(56, 189, 248, 0.12))',
+                                    border: '1px solid rgba(56, 189, 248, 0.35)',
+                                    borderRadius: '12px',
+                                    padding: '1rem 1.25rem',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    transition: 'all 0.2s ease',
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                    <div style={{ background: 'rgba(56, 189, 248, 0.2)', padding: '0.5rem', borderRadius: '8px' }}>
+                                        <Shield size={20} color="#38bdf8" />
+                                    </div>
+                                    <div>
+                                        <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase' }}>
+                                            LAND INTELLIGENCE 2.0
+                                        </span>
+                                        <h4 style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                                            {t('passport.title', 'Digital Land Passport')}
+                                        </h4>
+                                    </div>
+                                </div>
+                                <span style={{ color: '#38bdf8', fontSize: '0.8rem', fontWeight: 600 }}>
+                                    {t('passport.viewAction', 'View Passport')} →
+                                </span>
+                            </div>
+
+                            <div
+                                onClick={() => setActiveTab('story')}
+                                style={{
+                                    background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(192, 132, 252, 0.12))',
+                                    border: '1px solid rgba(192, 132, 252, 0.35)',
+                                    borderRadius: '12px',
+                                    padding: '1rem 1.25rem',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    transition: 'all 0.2s ease',
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                    <div style={{ background: 'rgba(192, 132, 252, 0.2)', padding: '0.5rem', borderRadius: '8px' }}>
+                                        <Sparkles size={20} color="#c084fc" />
+                                    </div>
+                                    <div>
+                                        <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#c084fc', textTransform: 'uppercase' }}>
+                                            LAND INTELLIGENCE 2.0
+                                        </span>
+                                        <h4 style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                                            {t('story.title', 'AI Land Story')}
+                                        </h4>
+                                    </div>
+                                </div>
+                                <span style={{ color: '#c084fc', fontSize: '0.8rem', fontWeight: 600 }}>
+                                    {t('story.generateButton', 'Generate Story')} →
+                                </span>
+                            </div>
+
+                            <div
+                                onClick={() => setActiveTab('anomalies')}
+                                style={{
+                                    background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(239, 68, 68, 0.12))',
+                                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                                    borderRadius: '12px',
+                                    padding: '1rem 1.25rem',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    transition: 'all 0.2s ease',
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                    <div style={{ background: 'rgba(239, 68, 68, 0.2)', padding: '0.5rem', borderRadius: '8px' }}>
+                                        <ShieldAlert size={20} color="#ef4444" />
+                                    </div>
+                                    <div>
+                                        <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#ef4444', textTransform: 'uppercase' }}>
+                                            LAND INTELLIGENCE 2.0
+                                        </span>
+                                        <h4 style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                                            {t('anomalies.title', 'Land Anomaly Detective')}
+                                        </h4>
+                                    </div>
+                                </div>
+                                <span style={{ color: '#ef4444', fontSize: '0.8rem', fontWeight: 600 }}>
+                                    {t('common.view', 'Detect')} →
+                                </span>
+                            </div>
+
+                            <div
+                                onClick={() => setActiveTab('evidence')}
+                                style={{
+                                    background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(52, 211, 153, 0.12))',
+                                    border: '1px solid rgba(52, 211, 153, 0.35)',
+                                    borderRadius: '12px',
+                                    padding: '1rem 1.25rem',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    transition: 'all 0.2s ease',
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                    <div style={{ background: 'rgba(52, 211, 153, 0.2)', padding: '0.5rem', borderRadius: '8px' }}>
+                                        <Layers size={20} color="#34d399" />
+                                    </div>
+                                    <div>
+                                        <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#34d399', textTransform: 'uppercase' }}>
+                                            LAND INTELLIGENCE 2.0
+                                        </span>
+                                        <h4 style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                                            {t('evidenceExplorer.title', 'Evidence Explorer')}
+                                        </h4>
+                                    </div>
+                                </div>
+                                <span style={{ color: '#34d399', fontSize: '0.8rem', fontWeight: 600 }}>
+                                    {t('common.view', 'Explore')} →
+                                </span>
+                            </div>
+                        </div>
 
                         {/* ── Buyer Quick Summary Banner ── */}
                         {land.is_for_sale && (
@@ -162,18 +348,18 @@ const LandProfileWrapper = () => {
                                         FOR SALE
                                     </div>
                                 )}
-                                <h2 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Land Details</h2>
+                                <h2 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>{t('profile.landDetails', 'Land Details')}</h2>
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 160px), 1fr))', gap: '0.75rem 1rem', marginTop: '1rem' }}>
-                                    <div><strong>Survey No:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.survey_number}</span></div>
-                                    <div><strong>Subdivision:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.subdivision_number}</span></div>
-                                    <div><strong>Location:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.location}</span></div>
-                                    <div><strong>Village:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.village}</span></div>
-                                    <div><strong>Taluk:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.taluk}</span></div>
-                                    <div><strong>District:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.district}</span></div>
-                                    <div><strong>Area:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.area_sq_ft?.toLocaleString()} sq ft</span></div>
-                                    <div><strong>Type:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.land_type}</span></div>
-                                    <div><strong>Owner:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.owner}</span></div>
-                                    <div><strong>Status:</strong><br /><span className={`status-badge ${land.status === 'Verified' ? 'status-success' : land.status === 'Contested' ? 'status-danger' : 'status-warning'}`}>{land.status}</span></div>
+                                    <div><strong>{t('profile.surveyNo', 'Survey No')}:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.survey_number}</span></div>
+                                    <div><strong>{t('profile.subdivision', 'Subdivision')}:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.subdivision_number}</span></div>
+                                    <div><strong>{t('profile.location', 'Location')}:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.location}</span></div>
+                                    <div><strong>{t('profile.village', 'Village')}:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.village}</span></div>
+                                    <div><strong>{t('profile.taluk', 'Taluk')}:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.taluk}</span></div>
+                                    <div><strong>{t('profile.district', 'District')}:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.district}</span></div>
+                                    <div><strong>{t('profile.area', 'Area')}:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.area_sq_ft?.toLocaleString()} sq ft</span></div>
+                                    <div><strong>{t('profile.type', 'Type')}:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.land_type}</span></div>
+                                    <div><strong>{t('profile.owner', 'Owner')}:</strong><br /><span style={{ color: 'var(--text-secondary)' }}>{land.owner}</span></div>
+                                    <div><strong>{t('profile.status', 'Status')}:</strong><br /><span className={`status-badge ${land.status === 'Verified' ? 'status-success' : land.status === 'Contested' ? 'status-danger' : 'status-warning'}`}>{land.status}</span></div>
                                 </div>
 
                                 {land.is_for_sale && (
@@ -297,12 +483,29 @@ const LandProfileWrapper = () => {
                 {activeTab === 'dna' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
                         <LandDNA dna={dna} risk={risk} />
+                        <RiskBreakdown landId={land.id} />
                         <RiskTimeline landId={land.id} />
                         <EnvironmentalRisk landId={land.id} />
                         <LandValueEstimator land={land} landId={land.id} />
                         <FragmentationDetector landId={land.id} />
                         <WhatIfSimulator landId={land.id} />
                     </div>
+                )}
+
+                {activeTab === 'passport' && (
+                    <LandPassport landId={land.id} />
+                )}
+
+                {activeTab === 'story' && (
+                    <AILandStory landId={land.id} />
+                )}
+
+                {activeTab === 'anomalies' && (
+                    <AnomalyDetective landId={land.id} />
+                )}
+
+                {activeTab === 'evidence' && (
+                    <EvidenceExplorer landId={land.id} />
                 )}
 
                 {activeTab === 'ai' && (

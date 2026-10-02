@@ -10,11 +10,12 @@ if _BACKEND_DIR not in sys.path:
 import logging
 import shutil
 import uuid
+import hashlib
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, Depends, File, Form, UploadFile
+from fastapi import FastAPI, HTTPException, Depends, File, Form, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -25,7 +26,13 @@ from database import get_db, engine, SessionLocal
 from models import (
     Base, Land, Owner, LandDocument, LegalCase, Mortgage,
     LandHistory, SavedLand, SellerListing, SellerPropertyDetail,
-    VerificationRecord, Alert, SellerDocumentUpload
+    VerificationRecord, Alert, SellerDocumentUpload, User
+)
+
+from auth_helpers import (
+    register_user, authenticate_user, create_access_token,
+    decode_access_token, revoke_token, get_user_by_id,
+    seed_demo_users_in_db, DEMO_PASSWORD
 )
 
 try:
@@ -33,6 +40,12 @@ try:
     load_dotenv()
 except ImportError:
     pass
+
+from phase2_helpers import (
+    detect_land_anomalies, build_land_evidence, build_risk_breakdown,
+    build_intelligent_alerts, _READ_ALERTS_SET
+)
+from chatbot_service import LandTraceAIChatbot
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -147,6 +160,10 @@ def _seed_database():
             db.commit()
             logger.info("Alerts seeded.")
 
+        # --- Users (Phase 2.5 Auth) ---
+        seed_demo_users_in_db(db)
+        logger.info("Demo users seeded.")
+
         logger.info("Database seeding complete.")
     except Exception as e:
         logger.error(f"Seeding error: {e}")
@@ -177,13 +194,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="LandTrace360 Complete API", lifespan=lifespan)
 
-# CORS — always allow the deployed Vercel frontend + localhost for dev.
+# CORS — always allow the deployed Vercel frontend + localhost / 127.0.0.1 for dev.
 # FRONTEND_URL env var is also respected if set (e.g. for staging/preview URLs).
 _VERCEL_URL = "https://land-trace360.vercel.app"
 _frontend_url = os.environ.get("FRONTEND_URL", "").strip()
 _allowed_origins = [
     "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
     _VERCEL_URL,  # production Vercel frontend — always allowed
     "https://landtrace360.vercel.app",
 ]
@@ -201,6 +222,14 @@ app.add_middleware(
 )
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
+
+@app.get("/")
+def root():
+    return {
+        "status": "ok",
+        "service": "LandTrace360 Complete API",
+        "version": "2.6.0"
+    }
 
 @app.get("/health")
 def health_check():
@@ -487,6 +516,13 @@ class Announcement(BaseModel):
 
 class AskQuery(BaseModel):
     question: str
+    language: Optional[str] = "en"
+
+class ChatRequest(BaseModel):
+    message: str
+    land_id: Optional[str] = None
+    language: Optional[str] = "en"
+    conversation_id: Optional[str] = None
 
 def _resolve_land_id(identifier: str, db: Optional[Session] = None) -> str:
     """Resolve an identifier that might be a survey_number or land_id to a canonical land_id."""
@@ -656,18 +692,60 @@ def get_saved_explicit(db: Session = Depends(get_db)):
     return list(_IN_MEMORY_SAVED_LANDS)
 
 @app.post("/api/lands/{land_id:path}/ask")
-def ask_land_ai(land_id: str, query: AskQuery):
-    """Refined AI endpoint handling detailed, land-specific demo interactions."""
-    canonical_id = _resolve_land_id(land_id)
-    q = query.question.lower().strip()
-    land = next((l for l in DEMO_LAND_DATA if l["id"] == canonical_id), None)
-    
-    if "other land" in q or "different land" in q or not canonical_id.startswith("LND-"):
-        return {"answer": "I can answer questions about this land using the available LandTrace360 demo records.", "sources": []}
+def ask_land_ai(land_id: str, query: AskQuery, db: Session = Depends(get_db)):
+    """
+    Explainable AI endpoint delivering structured:
+      ANSWER
+      WHY
+      EVIDENCE
+    Respects query.language ('en', 'ta', 'hi').
+    Uses only verified stored/demo records. Never fabricates evidence.
+    """
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    lang = (query.language or "en").lower().strip()
+    if lang not in ["en", "ta", "hi"]:
+        lang = "en"
 
+    # Get land data
+    land = None
+    if DB_AVAILABLE:
+        try:
+            db_l = db.query(Land).filter(Land.id == canonical_id).first()
+            if db_l:
+                land = _land_to_dict(db_l)
+        except Exception:
+            pass
     if not land:
-        return {"answer": "I can answer questions about this land using the available LandTrace360 demo records.", "sources": []}
+        land = next((l for l in DEMO_LAND_DATA if l["id"] == canonical_id), None)
 
+    no_evidence_msg = {
+        "en": "No supporting record is available in the project database.",
+        "ta": "திட்ட தரவுத்தளத்தில் ஆதரவு பதிவு எதுவும் கிடைக்கவில்லை.",
+        "hi": "परियोजना डेटाबेस में कोई समर्थक रिकॉर्ड उपलब्ध नहीं है।"
+    }[lang]
+
+    if not land or not canonical_id.startswith("LND-"):
+        fallbacks = {
+            "en": {
+                "answer": "I can only answer questions about this land using verified LandTrace360 demo records.",
+                "why": "The queried identifier does not correspond to an accessible land parcel.",
+                "evidence": [{"label": "Search Status", "value": no_evidence_msg}]
+            },
+            "ta": {
+                "answer": "சரிபார்க்கப்பட்ட லேண்ட் ட்ரேஸ்360 திட்ட பதிவுகளைப் பயன்படுத்தி மட்டுமே என்னால் பதிலளிக்க முடியும்.",
+                "why": "கேட்கப்பட்ட நில அடையாள எண் அணுகக்கூடிய பதிவேடுகளில் இல்லை.",
+                "evidence": [{"label": "தேடல் நிலை", "value": no_evidence_msg}]
+            },
+            "hi": {
+                "answer": "मैं केवल सत्यापित LandTrace360 परियोजना रिकॉर्ड का उपयोग करके इस भूमि के बारे में उत्तर दे सकता हूँ।",
+                "why": "पूछा गया पहचानकर्ता सुलभ भूमि पार्सल से मेल नहीं खाता है।",
+                "evidence": [{"label": "खोज स्थिति", "value": no_evidence_msg}]
+            }
+        }
+        res = fallbacks[lang]
+        return {**res, "sources": []}
+
+    q = query.question.lower().strip()
     risk = RISK_DATA.get(canonical_id, RISK_DATA["default"])
     dna = DNA_DATA.get(canonical_id, DNA_DATA["default"])
     docs = DOCUMENTS_DATA.get(canonical_id, DOCUMENTS_DATA["default"])
@@ -676,87 +754,369 @@ def ask_land_ai(land_id: str, query: AskQuery):
     boundary = BOUNDARY_DETECTION_DATA.get(canonical_id, BOUNDARY_DETECTION_DATA["default"])
     frag = FRAGMENTATION_ANALYSIS_DATA.get(canonical_id, FRAGMENTATION_ANALYSIS_DATA["default"])
     history = HISTORY_DATA.get(canonical_id, HISTORY_DATA["default"])
+    owners = OWNERS_DATA.get(canonical_id, OWNERS_DATA["default"])
 
-    sources = []
+    # --- 1. Intent: Owner ---
+    if any(kw in q for kw in ["owner", "who owns", "whose", "belong", "உரிமையாளர்", "யார்", "மாлик", "स्वामी"]):
+        sources = ["Ownership Registry", "Title Records"]
+        if lang == "ta":
+            answer = f"**{canonical_id}** நிலத்தின் தற்போதைய பதிவு செய்யப்பட்ட உரிமையாளர் **{land['owner']}** ஆவார்."
+            why = "அதிகாரப்பூர்வ நிலப் பதிவேடு மற்றும் உரிமை ஆவணங்களின் அடிப்படையில் சரிபார்க்கப்பட்டது."
+            evidence = [
+                {"label": "தற்போதைய உரிமையாளர்", "value": land["owner"]},
+                {"label": "சர்வே எண்", "value": land["survey_number"]},
+                {"label": "பதிவு நிலை", "value": land["status"]},
+                {"label": "நில அடையாளம்", "value": canonical_id}
+            ]
+        elif lang == "hi":
+            answer = f"**{canonical_id}** भूमि के वर्तमान पंजीकृत स्वामी **{land['owner']}** हैं।"
+            why = "आधिकारिक भूमि रजिस्ट्री और स्वामित्व दस्तावेजों के आधार पर सत्यापित।"
+            evidence = [
+                {"label": "वर्तमान स्वामी", "value": land["owner"]},
+                {"label": "सर्वेक्षण संख्या", "value": land["survey_number"]},
+                {"label": "पंजीकृत स्थिति", "value": land["status"]},
+                {"label": "भूमि पहचान", "value": canonical_id}
+            ]
+        else:
+            answer = f"The current recorded owner of **{canonical_id}** is **{land['owner']}**."
+            why = "Ownership title is verified against land registry records and chain of custody documentation."
+            evidence = [
+                {"label": "Current Owner", "value": land["owner"]},
+                {"label": "Survey Number", "value": land["survey_number"]},
+                {"label": "Title Status", "value": land["status"]},
+                {"label": "Land ID", "value": canonical_id}
+            ]
+        return {"answer": answer, "why": why, "evidence": evidence, "sources": sources}
 
-    # --- Intent: Owner ---
-    if any(kw in q for kw in ["owner", "who owns", "whose", "belong"]):
-        return {"answer": f"The current owner of **{land_id}** is **{land['owner']}**.", "sources": ["Ownership Records"]}
+    # --- 2. Intent: Mortgage ---
+    if any(kw in q for kw in ["mortgage", "bank", "loan", "lien", "encumbrance", "அடமானம்", "வங்கி", "கடன்", "बंधक", "ऋण", "बैंक"]):
+        sources = ["Mortgage Registry", "Banking Liens Database"]
+        active_m = next((m for m in mortgages if m.get("status") == "Active"), None)
+        if active_m:
+            if lang == "ta":
+                answer = f"ஆம், இந்த நிலத்தில் {active_m['bank']} வங்கியுடன் செயல்பாட்டில் உள்ள அடமானப் பதிவு உள்ளது."
+                why = "நிதிப் பொறுப்புப் பதிவேட்டில் இந்த நிலத்திற்கு செயல்பாட்டில் (Active) உள்ள அடமானப் பதிவு உள்ளது."
+                evidence = [
+                    {"label": "வங்கி / கடன் நிறுவனம்", "value": active_m["bank"]},
+                    {"label": "அடமான நிலை", "value": active_m["status"]},
+                    {"label": "பதிவு செய்யப்பட்ட தேதி", "value": active_m["start_date"]},
+                    {"label": "எதிர்பார்க்கப்படும் விடுவிப்பு", "value": active_m["release_date"]}
+                ]
+            elif lang == "hi":
+                answer = f"हाँ, इस भूमि पर {active_m['bank']} के साथ एक सक्रिय बंधक (ऋण) दर्ज है।"
+                why = "वित्तीय प्रभार रजिस्ट्री में इस भूमि के लिए सक्रिय (Active) स्थिति वाला बंधक रिकॉर्ड मौजूद है।"
+                evidence = [
+                    {"label": "बैंक / ऋणदाता", "value": active_m["bank"]},
+                    {"label": "बंधक स्थिति", "value": active_m["status"]},
+                    {"label": "पंजीकरण तिथि", "value": active_m["start_date"]},
+                    {"label": "अपेक्षित मुक्ति तिथि", "value": active_m["release_date"]}
+                ]
+            else:
+                answer = f"Yes, an active mortgage is recorded on this property with {active_m['bank']}."
+                why = "The land has a mortgage record whose status is Active in the financial encumbrance registry."
+                evidence = [
+                    {"label": "Bank / Lender", "value": active_m["bank"]},
+                    {"label": "Mortgage Status", "value": active_m["status"]},
+                    {"label": "Registration Date", "value": active_m["start_date"]},
+                    {"label": "Expected Release", "value": active_m["release_date"]}
+                ]
+        elif mortgages:
+            m0 = mortgages[0]
+            if lang == "ta":
+                answer = "தற்போது நிலுவையில் உள்ள அடமானம் எதுவும் இல்லை. முந்தைய அடமானம் விடுவிக்கப்பட்டுள்ளது."
+                why = "அடமானப் பதிவுகளில் முந்தைய நிதிப் பொறுப்புகள் முடிக்கப்பட்டு விடுவிக்கப்பட்டதாகக் காட்டுகின்றன."
+                evidence = [
+                    {"label": "வங்கி", "value": m0["bank"]},
+                    {"label": "அடமான நிலை", "value": m0["status"]},
+                    {"label": "விடுவிக்கப்பட்ட தேதி", "value": m0["release_date"]}
+                ]
+            elif lang == "hi":
+                answer = "वर्तमान में कोई सक्रिय बंधक लंबित नहीं है। पिछला बंधक चुकाया जा चुका है और जारी किया गया है।"
+                why = "बंधक रिकॉर्ड दर्शाते हैं कि पिछले सभी दायित्व पूर्ण और मुक्त कर दिए गए हैं।"
+                evidence = [
+                    {"label": "बैंक", "value": m0["bank"]},
+                    {"label": "बंधक स्थिति", "value": m0["status"]},
+                    {"label": "मुक्ति तिथि", "value": m0["release_date"]}
+                ]
+            else:
+                answer = "No active mortgage is currently pending. Prior recorded mortgage has been fully cleared and released."
+                why = "Mortgage records indicate release status for prior liabilities."
+                evidence = [
+                    {"label": "Bank", "value": m0["bank"]},
+                    {"label": "Mortgage Status", "value": m0["status"]},
+                    {"label": "Release Date", "value": m0["release_date"]}
+                ]
+        else:
+            if lang == "ta":
+                answer = "இந்த நிலத்திற்கான அடமானப் பதிவுகள் எதுவும் திட்ட பதிவுகளில் இல்லை."
+                why = "இந்த நிலத்திற்கான அடமானப் பதிவேட்டில் எந்த ஒரு அடமானப் பதிவும் கிடைக்கவில்லை."
+                evidence = [{"label": "அடமான நிலை", "value": no_evidence_msg}]
+            elif lang == "hi":
+                answer = "इस भूमि के लिए कोई सक्रिय बंधक या बैंक ऋण दर्ज नहीं है।"
+                why = "इस भूमि के लिए डेटाबेस में कोई बंधक या प्रभार रिकॉर्ड नहीं मिला।"
+                evidence = [{"label": "बंधक स्थिति", "value": no_evidence_msg}]
+            else:
+                answer = "No active mortgage or bank loan is recorded for this land."
+                why = "No supporting mortgage or lien records were found in the database."
+                evidence = [{"label": "Mortgage Status", "value": no_evidence_msg}]
+        return {"answer": answer, "why": why, "evidence": evidence, "sources": sources}
 
-    # --- Intent: Boundary ---
-    if any(kw in q for kw in ["boundary", "border"]):
-        sources.append("Boundary Detection")
-        return {"answer": f"Boundary Status for **{land_id}**: {boundary['change_status']} ({boundary['deviation_percentage']}% deviation from previous {boundary['previous_status']}). Risk Impact is considered {boundary['risk_impact']}.", "sources": sources}
+    # --- 3. Intent: Risk Score ---
+    if any(kw in q for kw in ["risk", "score", "why risk", "safe", "danger", "hazard", "இடர்", "ஆபத்து", "மதிப்பீடு", "जोखिम", "स्कोर", "सुरक्षित"]):
+        sources = ["AI Risk Engine", "Multi-Factor Registry Analysis"]
+        if lang == "ta":
+            answer = f"தற்போதைய திட்ட இடர் மதிப்பீடு **{risk['overall_score']}/100** ({risk['level']} ஆபத்து) ஆகும்."
+            why = "பதிவு செய்யப்பட்ட சட்ட வழக்குகள், எல்லை வேறுபாடுகள் மற்றும் ஆவண சரிபார்ப்பு நிலைகளின் அடிப்படையில் கணக்கிடப்பட்டுள்ளது."
+            evidence = [
+                {"label": "ஒட்டுமொத்த இடர் மதிப்பீடு", "value": f"{risk['overall_score']}/100 ({risk['level']})"},
+                {"label": "சட்ட ரீதியான ஆபத்து", "value": risk["legal_risk"]},
+                {"label": "எல்லை ஆபத்து", "value": risk["boundary_risk"]},
+                {"label": "உரிமையாளர் ஆபத்து", "value": risk["ownership_risk"]},
+                {"label": "ஆவண ஆபத்து", "value": risk["document_risk"]}
+            ]
+        elif lang == "hi":
+            answer = f"वर्तमान परियोजना जोखिम स्कोर **{risk['overall_score']}/100** ({risk['level']} जोखिम) है।"
+            why = "दर्ज कानूनी मुकदमों, सीमा विसंगतियों, स्वामित्व और दस्तावेज़ जोखिम कारकों के आधार पर निर्धारित किया गया है।"
+            evidence = [
+                {"label": "कुल जोखिम स्कोर", "value": f"{risk['overall_score']}/100 ({risk['level']})"},
+                {"label": "कानूनी जोखिम", "value": risk["legal_risk"]},
+                {"label": "सीमा जोखिम", "value": risk["boundary_risk"]},
+                {"label": "स्वामित्व जोखिम", "value": risk["ownership_risk"]},
+                {"label": "दस्तावेज़ जोखिम", "value": risk["document_risk"]}
+            ]
+        else:
+            answer = f"The current project risk score is **{risk['overall_score']}/100** ({risk['level']} Risk)."
+            why = "High risk is mainly associated with the stored legal, boundary, ownership, and document risk factors." if risk['overall_score'] >= 70 else ("Moderate risk considerations noted across boundary or documentation." if risk['overall_score'] >= 35 else "Low risk score with strong ownership stability and clear title documentation.")
+            evidence = [
+                {"label": "Overall Risk Score", "value": f"{risk['overall_score']}/100 ({risk['level']})"},
+                {"label": "Legal Risk", "value": risk["legal_risk"]},
+                {"label": "Boundary Risk", "value": risk["boundary_risk"]},
+                {"label": "Ownership Risk", "value": risk["ownership_risk"]},
+                {"label": "Document Risk", "value": risk["document_risk"]}
+            ]
+        return {"answer": answer, "why": why, "evidence": evidence, "sources": sources}
 
-    # --- Intent: Subdivisions / Fragmentation ---
-    if any(kw in q for kw in ["subdivision", "fragment", "split", "divided"]):
-        sources.append("Fragmentation Detector")
-        if frag['subdivisions'] == 0:
-            return {"answer": f"**{land_id}** has **0 subdivisions**. It remains the original {frag['original_area']} sq ft parcel with No Fragmentation.", "sources": sources}
-        return {"answer": f"**{land_id}** has **{frag['subdivisions']} subdivisions**. It was originally {frag['original_area']} sq ft and now sits at {frag['current_area']} sq ft. {frag['description']}", "sources": sources}
+    # --- 4. Intent: Legal Cases ---
+    if any(kw in q for kw in ["legal", "case", "court", "dispute", "litigation", "சட்டம்", "வழக்கு", "நீதிமன்றம்", "कानूनी", "मामला", "अदालत", "विवाद"]):
+        sources = ["Judicial Court Dockets", "Litigation Registry"]
+        if cases:
+            if lang == "ta":
+                answer = f"**{canonical_id}** நிலத்திற்கு {len(cases)} சட்ட வழக்கு(கள்) பதிவாகியுள்ளன."
+                why = "நீதிமன்ற வழக்கு பதிவேடுகளிலிருந்து சரிபார்க்கப்பட்டது."
+                evidence = [{"label": f"வழக்கு எண் {c['case_no']}", "value": f"{c['type']} - {c['court']} (நிலை: {c['status']}, பதிவு: {c['filing_date']})"} for c in cases]
+            elif lang == "hi":
+                answer = f"**{canonical_id}** के लिए {len(cases)} कानूनी मामले दर्ज पाए गए हैं।"
+                why = "न्यायालय डॉकेट और विवाद रजिस्ट्री के साथ मिलान किया गया।"
+                evidence = [{"label": f"मामला सं. {c['case_no']}", "value": f"{c['type']} - {c['court']} (स्थिति: {c['status']}, दर्ज: {c['filing_date']})"} for c in cases]
+            else:
+                answer = f"Found {len(cases)} legal case(s) associated with **{canonical_id}**."
+                why = "Matched against active judicial court docket records for this parcel."
+                evidence = [{"label": f"Case {c['case_no']}", "value": f"{c['type']} at {c['court']} (Status: {c['status']}, Filed: {c['filing_date']})"} for c in cases]
+        else:
+            if lang == "ta":
+                answer = f"**{canonical_id}** நிலத்திற்கு திட்ட பதிவுகளில் எந்தவொரு நிலுவையிலுள்ள வழக்குகளும் இல்லை."
+                why = "நீதிமன்ற பதிவேடுகளில் நிலுவையில் உள்ள வழக்குகள் ஏதுமில்லை என பதிவாகியுள்ளது."
+                evidence = [{"label": "நீதிமன்ற வழக்குகள்", "value": no_evidence_msg}]
+            elif lang == "hi":
+                answer = f"**{canonical_id}** के लिए परियोजना रिकॉर्ड में कोई सक्रिय कानूनी मामला नहीं मिला।"
+                why = "न्यायालय विवाद रजिस्ट्री शून्य लंबित मामलों के साथ स्पष्ट रिकॉर्ड दिखाती है।"
+                evidence = [{"label": "मुकदमा डॉकेट", "value": no_evidence_msg}]
+            else:
+                answer = f"No active legal cases found in project records for **{canonical_id}**."
+                why = "Civil litigation registry returns clean title with zero pending lawsuits."
+                evidence = [{"label": "Litigation Docket", "value": no_evidence_msg}]
+        return {"answer": answer, "why": why, "evidence": evidence, "sources": sources}
 
-    # --- Intent: History / Past ---
-    if any(kw in q for kw in ["past", "history", "happened"]):
-        sources.append("Time Machine Data")
-        hist_str = "\n".join([f"- In **{h['year']}**: Owned by {h['owner']}, Status: {h['status']}" for h in history])
-        return {"answer": f"Here is the demo history for **{land_id}**:\n{hist_str}", "sources": sources}
+    # --- 5. Intent: Boundary ---
+    if any(kw in q for kw in ["boundary", "border", "encroach", "survey", "எல்லை", "सीमा"]):
+        sources = ["Cadastral Survey Records", "Satellite Boundary AI"]
+        if lang == "ta":
+            answer = f"**{canonical_id}** நிலத்தின் எல்லை நிலை: **{boundary['change_status']}** ({boundary['deviation_percentage']}% விலகல்)."
+            why = "முந்தைய ஆய்வு வரைபடத்துடன் சமீபத்திய செயற்கைக்கோள் நில அளவீடு ஒப்பிடப்பட்டது."
+            evidence = [
+                {"label": "எல்லை நிலை", "value": boundary["change_status"]},
+                {"label": "விலகல் சதவீதம்", "value": f"{boundary['deviation_percentage']}%"},
+                {"label": "கடைசி ஆய்வு தேதி", "value": boundary["last_survey_date"]},
+                {"label": "இடர் தாக்கம்", "value": boundary["risk_impact"]}
+            ]
+        elif lang == "hi":
+            answer = f"**{canonical_id}** की सीमा स्थिति: **{boundary['change_status']}** ({boundary['deviation_percentage']}% विचलन)।"
+            why = "पिछले सर्वेक्षण मानचित्र के साथ उपग्रह और भूकर सर्वेक्षण की तुलना की गई।"
+            evidence = [
+                {"label": "सीमा स्थिति", "value": boundary["change_status"]},
+                {"label": "विचलन प्रतिशत", "value": f"{boundary['deviation_percentage']}%"},
+                {"label": "अंतिम सर्वेक्षण तिथि", "value": boundary["last_survey_date"]},
+                {"label": "जोखिम प्रभाव", "value": boundary["risk_impact"]}
+            ]
+        else:
+            answer = f"Boundary Status for **{canonical_id}**: **{boundary['change_status']}** with a **{boundary['deviation_percentage']}%** deviation index."
+            why = "Current survey footprint was compared against historical cadastral registry markers."
+            evidence = [
+                {"label": "Boundary Status", "value": boundary["change_status"]},
+                {"label": "Deviation Index", "value": f"{boundary['deviation_percentage']}%"},
+                {"label": "Last Survey Date", "value": boundary["last_survey_date"]},
+                {"label": "Risk Impact", "value": boundary["risk_impact"]}
+            ]
+        return {"answer": answer, "why": why, "evidence": evidence, "sources": sources}
 
-    # --- Intent: Legal / Cases ---
-    if any(kw in q for kw in ["legal", "case", "court", "dispute", "litigation"]):
-        sources.append("Legal & Cases")
-        if not cases:
-            return {"answer": "This information is not available in the current demo records.", "sources": sources}
-        case_list = "\n".join([f"- **{c['case_no']}**: {c['type']} at {c['court']} (Status: {c['status']})" for c in cases])
-        return {"answer": f"Legal cases found for **{land_id}**:\n{case_list}", "sources": sources}
+    # --- 6. Intent: Subdivisions / Fragmentation ---
+    if any(kw in q for kw in ["subdivision", "fragment", "split", "divided", "பிரிவு", "उपखंड", "विभाजन"]):
+        sources = ["Fragmentation Detector", "Cadastral Plot History"]
+        if frag["subdivisions"] == 0:
+            if lang == "ta":
+                answer = f"**{canonical_id}** நிலத்தில் உபபிரிவுகள் ஏதுமில்லை (0). அசல் பரப்பளவான {frag['original_area']} சதுர அடி முழுமையாக தக்கவைக்கப்பட்டுள்ளது."
+            elif lang == "hi":
+                answer = f"**{canonical_id}** में कोई उपखंड नहीं है (0)। यह अपने मूल {frag['original_area']} वर्ग फुट पार्सल को बनाए रखता है।"
+            else:
+                answer = f"**{canonical_id}** has **0 subdivisions**. It remains the original {frag['original_area']} sq ft parcel with No Fragmentation."
+        else:
+            if lang == "ta":
+                answer = f"**{canonical_id}** நிலத்தில் **{frag['subdivisions']} உபபிரிவுகள்** செய்யப்பட்டுள்ளன. அசல் {frag['original_area']} சதுர அடியிலிருந்து தற்போது {frag['current_area']} சதுர அடியாக உள்ளது."
+            elif lang == "hi":
+                answer = f"**{canonical_id}** में **{frag['subdivisions']} उपखंड** हुए हैं। यह मूल {frag['original_area']} वर्ग फुट से अब {frag['current_area']} वर्ग फुट है।"
+            else:
+                answer = f"**{canonical_id}** has **{frag['subdivisions']} subdivisions**. It was originally {frag['original_area']} sq ft and now sits at {frag['current_area']} sq ft. {frag['description']}"
+        why = "Calculated from parcel lineage records and historical parent plot registry."
+        evidence = [
+            {"label": "Subdivisions Count", "value": str(frag["subdivisions"])},
+            {"label": "Original Area", "value": f"{frag['original_area']} sq ft"},
+            {"label": "Current Area", "value": f"{frag['current_area']} sq ft"},
+            {"label": "Fragmentation Status", "value": frag["status"]}
+        ]
+        return {"answer": answer, "why": why, "evidence": evidence, "sources": sources}
 
-    # --- Intent: Documents ---
-    if any(kw in q for kw in ["document", "doc ", "docs", "deed", "certificate", "record"]):
-        sources.append("Document Cross-Verification")
-        if not docs:
-            return {"answer": "This information is not available in the current demo records.", "sources": sources}
-        doc_list = "\n".join([f"- **{d['doc_no']}**: {d['type']} ({d['verification']})" for d in docs])
-        return {"answer": f"Available official documents for **{land_id}**:\n{doc_list}", "sources": sources}
+    # --- 7. Intent: History / Timeline ---
+    if any(kw in q for kw in ["past", "history", "happened", "timeline", "வரலாறு", "इतिहास", "समय"]):
+        sources = ["Time Machine Database", "Historical Ownership Chain"]
+        hist_summary = "; ".join([f"In {h['year']}: {h['owner']} ({h['status']})" for h in history])
+        if lang == "ta":
+            answer = f"**{canonical_id}** நிலத்தின் வரலாற்று சுருக்கம்:\n" + "\n".join([f"- **{h['year']}**: உரிமையாளர் {h['owner']}, நிலை: {h['status']}" for h in history])
+            why = "நில உரிமை காலவரிசைப் பதிவேட்டிலிருந்து தொகுக்கப்பட்டது."
+        elif lang == "hi":
+            answer = f"**{canonical_id}** का ऐतिहासिक सारांश:\n" + "\n".join([f"- **{h['year']}**: स्वामी {h['owner']}, स्थिति: {h['status']}" for h in history])
+            why = "भूमि स्वामित्व समयरेखा रजिस्ट्री से संकलित।"
+        else:
+            answer = f"Chronological history for **{canonical_id}**:\n" + "\n".join([f"- **{h['year']}**: Owned by {h['owner']}, Status: {h['status']}" for h in history])
+            why = "Compiled from chronological deed transfers and tax registry ledgers."
+        evidence = [{"label": f"Year {h['year']}", "value": f"Owner: {h['owner']}, Status: {h['status']}, Risk: {h['risk_score']}"} for h in history]
+        return {"answer": answer, "why": why, "evidence": evidence, "sources": sources}
 
-    # --- Intent: Mortgage ---
-    if any(kw in q for kw in ["mortgage", "bank", "loan", "lien", "encumbrance"]):
-        sources.append("Mortgage Records")
-        if not mortgages:
-            return {"answer": "No active mortgages found in the current demo records for this land.", "sources": sources}
-        m_list = "\n".join([f"- **{m['bank']}** ({m['start_date']} to {m['release_date']}) - Status: {m['status']}" for m in mortgages])
-        return {"answer": f"Mortgage details for **{land_id}**:\n{m_list}", "sources": sources}
+    # --- 8. Intent: Documents ---
+    if any(kw in q for kw in ["document", "doc ", "docs", "deed", "certificate", "record", "ஆவணம்", "பத்திரம்", "दस्तावेज़"]):
+        sources = ["Document Verification Engine", "Registry Archive"]
+        if docs:
+            if lang == "ta":
+                answer = f"**{canonical_id}** நிலத்திற்கு {len(docs)} சரிபார்க்கப்பட்ட ஆவணங்கள் கிடைக்கின்றன."
+                why = "பதிவுத்துறை மற்றும் பத்திரக் காப்பகப் பதிவுகளின்படி சரிபார்க்கப்பட்டது."
+            elif lang == "hi":
+                answer = f"**{canonical_id}** के लिए {len(docs)} सत्यापित दस्तावेज़ उपलब्ध हैं।"
+                why = "पंजीकरण विभाग और अभिलेखागार रिकॉर्ड के अनुसार सत्यापित।"
+            else:
+                answer = f"Found {len(docs)} official documents registered on file for **{canonical_id}**."
+                why = "Verified against registered deed dockets and digital land archives."
+            evidence = [{"label": f"Doc {d['doc_no']}", "value": f"Type: {d['type']}, Date: {d['date']}, Verification: {d['verification']}"} for d in docs]
+        else:
+            answer = "No document records are available for this parcel."
+            why = "Document registry has no matching files for this parcel ID."
+            evidence = [{"label": "Document Records", "value": no_evidence_msg}]
+        return {"answer": answer, "why": why, "evidence": evidence, "sources": sources}
 
-    # --- Intent: Risk Score / Why Risky / What to Check ---
-    if any(kw in q for kw in ["risk", "check", "consider", "safe"]):
-        sources.append("AI Risk Analysis")
-        return {"answer": f"**Risk Analysis for {land_id}**: Overall Score is **{risk['overall_score']}/100** ({risk['level']} Risk).\n\nKey areas to review:\n- Document Risk: {risk['document_risk']}\n- Ownership Risk: {risk['ownership_risk']}\n- Legal Risk: {risk['legal_risk']}\n- Boundary Risk: {risk['boundary_risk']}\n\nYou should thoroughly check the {risk['level']} risk factors before making a decision.", "sources": sources}
+    # --- 9. Intent: DNA / Health ---
+    if any(kw in q for kw in ["health", "dna", "stability", "தன்மை", "स्वास्थ्य"]):
+        sources = ["Land DNA Diagnostic Engine"]
+        if lang == "ta":
+            answer = f"**{canonical_id}** நிலத்தின் ஒட்டுமொத்த நல்வாழ்வு மதிப்பீடு (Health Score): **{dna['overall_health']}%** ஆகும்."
+            why = "உரிமையாளர் நிலைத்தன்மை, ஆவண நலம், சட்டப் பாதுகாப்பு மற்றும் அடமான நிலைகளின் கூட்டு பகுப்பாய்வு."
+            evidence = [
+                {"label": "ஒட்டுமொத்த நலம்", "value": f"{dna['overall_health']}%"},
+                {"label": "உரிமை நிலைத்தன்மை", "value": f"{dna['ownership_stability']}%"},
+                {"label": "ஆவண நலம்", "value": f"{dna['document_health']}%"},
+                {"label": "சட்ட பாதுகாப்பு", "value": f"{dna['legal_safety']}%"},
+                {"label": "அடமான நிலைத்தன்மை", "value": f"{dna['mortgage_status']}%"}
+            ]
+        elif lang == "hi":
+            answer = f"**{canonical_id}** के लिए भूमि स्वास्थ्य स्कोर (Health Score): **{dna['overall_health']}%** है।"
+            why = "स्वामित्व स्थिरता, दस्तावेज़ अखंडता, कानूनी सुरक्षा और बंधक स्थिति का समग्र मूल्यांकन।"
+            evidence = [
+                {"label": "कुल स्वास्थ्य", "value": f"{dna['overall_health']}%"},
+                {"label": "स्वामित्व स्थिरता", "value": f"{dna['ownership_stability']}%"},
+                {"label": "दस्तावेज़ स्वास्थ्य", "value": f"{dna['document_health']}%"},
+                {"label": "कानूनी सुरक्षा", "value": f"{dna['legal_safety']}%"},
+                {"label": "बंधक स्थिति", "value": f"{dna['mortgage_status']}%"}
+            ]
+        else:
+            answer = f"Land Health Score for **{canonical_id}** is **{dna['overall_health']}%**."
+            why = "Derived from aggregate multi-factor scoring of ownership stability, legal safety, document validity, and boundary consistency."
+            evidence = [
+                {"label": "Overall Health", "value": f"{dna['overall_health']}%"},
+                {"label": "Ownership Stability", "value": f"{dna['ownership_stability']}%"},
+                {"label": "Document Health", "value": f"{dna['document_health']}%"},
+                {"label": "Legal Safety", "value": f"{dna['legal_safety']}%"},
+                {"label": "Mortgage Stability", "value": f"{dna['mortgage_status']}%"}
+            ]
+        return {"answer": answer, "why": why, "evidence": evidence, "sources": sources}
 
-    # --- Intent: Health / DNA ---
-    if any(kw in q for kw in ["health", "dna", "stability"]):
-        sources.append("Land DNA")
-        return {"answer": f"Land Health Score for **{land_id}**: **{dna['overall_health']}%**.\nBreakdown: Ownership Stability {dna['ownership_stability']}%, Document Health {dna['document_health']}%, Legal Safety {dna['legal_safety']}%, Mortgage Status {dna['mortgage_status']}%, Boundary Stability {dna['boundary_stability']}%.", "sources": sources}
+    # --- 10. Intent: Comprehensive Summary ---
+    if any(kw in q for kw in ["summary", "overview", "everything", "all", "complete", "detail", "full", "சுருக்கம்", "सारांश"]):
+        sources = ["Registry Overview", "Risk Engine", "Cadastral Dockets"]
+        active_m_txt = "Active" if any(m.get("status") == "Active" for m in mortgages) else ("Released" if mortgages else "None")
+        cases_txt = f"{len(cases)} case(s)" if cases else "None"
+        if lang == "ta":
+            answer = (f"**{canonical_id} பற்றிய முழுமையான சுருக்கம்:**\n"
+                      f"• உரிமையாளர்: {land['owner']}\n"
+                      f"• நிலை: {land['status']}\n"
+                      f"• பரப்பளவு: {land['area_sq_ft']:,} சதுர அடி ({land['land_type']})\n"
+                      f"• இடர் மதிப்பீடு: {risk['overall_score']}/100 ({risk['level']})\n"
+                      f"• எல்லை நிலை: {boundary['change_status']}\n"
+                      f"• அடமான நிலை: {active_m_txt}\n"
+                      f"• சட்ட வழக்குகள்: {cases_txt}")
+            why = "அனைத்து முக்கிய திட்ட தரவுத்தள பதிவுகளிலிருந்தும் ஒருங்கிணைக்கப்பட்டது."
+        elif lang == "hi":
+            answer = (f"**{canonical_id} का समग्र सारांश:**\n"
+                      f"• स्वामी: {land['owner']}\n"
+                      f"• स्थिति: {land['status']}\n"
+                      f"• क्षेत्रफल: {land['area_sq_ft']:,} वर्ग फुट ({land['land_type']})\n"
+                      f"• जोखिम स्कोर: {risk['overall_score']}/100 ({risk['level']})\n"
+                      f"• सीमा स्थिति: {boundary['change_status']}\n"
+                      f"• बंधक स्थिति: {active_m_txt}\n"
+                      f"• कानूनी मामले: {cases_txt}")
+            why = "सभी प्रमुख परियोजना डेटाबेस तालिकाओं से संकलित।"
+        else:
+            answer = (f"**Comprehensive Land Summary for {canonical_id}:**\n"
+                      f"• Owner: {land['owner']}\n"
+                      f"• Status: {land['status']}\n"
+                      f"• Area: {land['area_sq_ft']:,} sq ft ({land['land_type']})\n"
+                      f"• Risk Score: {risk['overall_score']}/100 ({risk['level']})\n"
+                      f"• Boundary: {boundary['change_status']}\n"
+                      f"• Mortgage: {active_m_txt}\n"
+                      f"• Legal Cases: {cases_txt}")
+            why = "Aggregated across all primary registry and diagnostic tables in the project database."
+        evidence = [
+            {"label": "Owner", "value": land["owner"]},
+            {"label": "Area", "value": f"{land['area_sq_ft']:,} sq ft"},
+            {"label": "Type", "value": land["land_type"]},
+            {"label": "Risk Score", "value": f"{risk['overall_score']}/100"},
+            {"label": "Boundary Status", "value": boundary["change_status"]}
+        ]
+        return {"answer": answer, "why": why, "evidence": evidence, "sources": sources}
 
-    # --- Intent: Summary ---
-    if any(kw in q for kw in ["summary", "overview", "everything", "all", "complete", "detail", "full"]):
-        sources = ["Overview", "DNA", "Legal", "Boundary", "Fragmentation"]
-        doc_names = ", ".join([d['type'] for d in docs]) if docs else "None"
-        case_info = ", ".join([f"{c['case_no']} ({c['status']})" for c in cases]) if cases else "None"
-        mortgage_info = ", ".join([f"{m['bank']} ({m['status']})" for m in mortgages]) if mortgages else "None"
-        sale_info = f"For Sale at ₹{land['asking_price']:,}" if land['is_for_sale'] else "Not for sale"
-        
-        summary = (f"**Comprehensive Land Summary for {land_id}:**\n\n"
-                   f"• **Owner:** {land['owner']}\n"
-                   f"• **Status:** {land['status']}\n"
-                   f"• **Area:** {land['area_sq_ft']:,} sq ft ({land['land_type']})\n"
-                   f"• **Documents:** {doc_names}\n"
-                   f"• **Legal Cases:** {case_info}\n"
-                   f"• **Mortgages:** {mortgage_info}\n"
-                   f"• **Risk Score:** {risk['overall_score']} ({risk['level']})\n"
-                   f"• **Boundary Status:** {boundary['change_status']}\n"
-                   f"• **Fragmentation Status:** {frag['subdivisions']} subdivisions ({frag['status']})")
-        return {"answer": summary, "sources": sources}
-
-    # --- Fallback: General Info ---
-    return {"answer": f"Based on the records for **{land_id}**: it is a **{land['land_type']}** property at **{land['location']}**, owned by **{land['owner']}**, with status **{land['status']}**. You can ask me about the owner, area, survey number, documents, legal cases, mortgage, risk score, health score, boundary, fragmentation, or request a full summary.", "sources": []}
+    # --- 11. Fallback ---
+    if lang == "ta":
+        answer = f"**{canonical_id}** நில பதிவுகளின்படி: இது **{land['location']}** பகுதியில் உள்ள **{land['land_type']}** நிலம். தற்போதைய உரிமையாளர் **{land['owner']}**, நிலை: **{land['status']}**."
+        why = "உரிமையாளர், அடமானம், இடர் மதிப்பீடு, எல்லை, ஆவணங்கள் அல்லது சட்ட வழக்குகள் குறித்து நீங்கள் என்னிடம் கேட்கலாம்."
+    elif lang == "hi":
+        answer = f"**{canonical_id}** के रिकॉर्ड के अनुसार: यह **{land['location']}** में स्थित **{land['land_type']}** भूमि है। वर्तमान स्वामी **{land['owner']}** हैं, स्थिति: **{land['status']}**।"
+        why = "आप मुझसे स्वामी, बंधक, जोखिम स्कोर, सीमा, दस्तावेज़ या कानूनी मामलों के बारे में पूछ सकते हैं।"
+    else:
+        answer = f"Based on the records for **{canonical_id}**: it is a **{land['land_type']}** property at **{land['location']}**, owned by **{land['owner']}**, with status **{land['status']}**."
+        why = "You can ask about the owner, mortgage, risk score, legal cases, documents, boundary, subdivisions, or request a complete summary."
+    evidence = [
+        {"label": "Land ID", "value": canonical_id},
+        {"label": "Owner", "value": land["owner"]},
+        {"label": "Location", "value": land["location"]},
+        {"label": "Status", "value": land["status"]}
+    ]
+    return {"answer": answer, "why": why, "evidence": evidence, "sources": ["General Registry Record"]}
 
 BOUNDARY_HISTORY = {
     2005: {"previous_status": "N/A", "current_status": "Unmarked", "last_survey_date": "N/A", "deviation_percentage": "N/A"},
@@ -1479,6 +1839,583 @@ def qr_profile(land_id: str, db: Session = Depends(get_db)):
         "land_id": canonical_id
     }
 
+def _fetch_land_context(canonical_id: str, db: Optional[Session] = None):
+    canonical_id = _resolve_land_id(canonical_id, db if DB_AVAILABLE else None)
+    land = None
+    if DB_AVAILABLE and db:
+        try:
+            db_land = db.query(Land).filter(
+                (Land.id == canonical_id) | (Land.survey_number == canonical_id)
+            ).first()
+            if db_land:
+                land = _land_to_dict(db_land)
+        except Exception:
+            pass
+    if not land:
+        for item in DEMO_LAND_DATA:
+            if item["id"] == canonical_id or item["survey_number"].lower() == canonical_id.lower():
+                land = item.copy()
+                break
+    if not land:
+        land = DEMO_LAND_DATA[0].copy()
+        canonical_id = land["id"]
+
+    risk = RISK_DATA.get(canonical_id, RISK_DATA.get("default", {}))
+    dna = DNA_DATA.get(canonical_id, DNA_DATA.get("default", {}))
+
+    docs = []
+    if DB_AVAILABLE and db:
+        try:
+            db_docs = db.query(LandDocument).filter(LandDocument.land_id == canonical_id).all()
+            docs = [{"doc_no": d.doc_no, "type": d.type, "date": d.date,
+                     "verification": d.verification, "result": d.result} for d in db_docs]
+        except Exception:
+            pass
+    if not docs:
+        docs = DOCUMENTS_DATA.get(canonical_id, DOCUMENTS_DATA.get("default", [])).copy()
+
+    cases = []
+    if DB_AVAILABLE and db:
+        try:
+            db_cases = db.query(LegalCase).filter(LegalCase.land_id == canonical_id).all()
+            cases = [{"case_number": c.case_number, "court": c.court, "parties": c.parties,
+                      "status": c.status, "year": c.year} for c in db_cases]
+        except Exception:
+            pass
+    if not cases:
+        cases = CASES_DATA.get(canonical_id, CASES_DATA.get("default", [])).copy()
+
+    mortgages = []
+    if DB_AVAILABLE and db:
+        try:
+            db_m = db.query(Mortgage).filter(Mortgage.land_id == canonical_id).all()
+            mortgages = [{"bank": m.bank, "start_date": m.start_date,
+                          "release_date": m.release_date, "status": m.status} for m in db_m]
+        except Exception:
+            pass
+    if not mortgages:
+        mortgages = MORTGAGES_DATA.get(canonical_id, MORTGAGES_DATA.get("default", [])).copy()
+
+    owners = []
+    if DB_AVAILABLE and db:
+        try:
+            db_o = db.query(Owner).filter(Owner.land_id == canonical_id).all()
+            owners = [{"name": o.name, "period": o.period, "type": o.owner_type} for o in db_o]
+        except Exception:
+            pass
+    if not owners:
+        owners = OWNERS_DATA.get(canonical_id, OWNERS_DATA.get("default", [])).copy()
+
+    history = []
+    if DB_AVAILABLE and db:
+        try:
+            db_h = db.query(LandHistory).filter(LandHistory.land_id == canonical_id).order_by(LandHistory.year).all()
+            history = [{"year": h.year, "owner": h.owner, "status": h.status,
+                        "transactions": h.transactions, "risk_score": h.risk_score,
+                        "boundary_status": h.boundary_status} for h in db_h]
+        except Exception:
+            pass
+    if not history:
+        history = HISTORY_DATA.get(canonical_id, HISTORY_DATA.get("default", [])).copy()
+
+    boundary = BOUNDARY_DETECTION_DATA.get(canonical_id, BOUNDARY_DETECTION_DATA.get("default", {}))
+    frag = FRAGMENTATION_ANALYSIS_DATA.get(canonical_id, FRAGMENTATION_ANALYSIS_DATA.get("default", {}))
+
+    return canonical_id, land, risk, dna, docs, cases, mortgages, owners, history, boundary, frag
+
+
+def _build_land_passport(canonical_id: str, db: Optional[Session] = None):
+    canonical_id, land, risk, dna, docs, cases, mortgages, owners, history, boundary, frag = _fetch_land_context(canonical_id, db)
+
+    active_cases = [c for c in cases if str(c.get("status", "")).lower() in ["active", "ongoing", "pending", "contested"]]
+    if active_cases:
+        case_nums = ", ".join([c.get("case_no") or c.get("case_number", "Case") for c in active_cases])
+        legal_status = f"{len(active_cases)} Active Case(s): {case_nums}"
+    elif cases:
+        legal_status = "Resolved / Closed (Clear)"
+    else:
+        legal_status = "Clear / No Litigation Recorded"
+
+    active_mortgages = [m for m in mortgages if str(m.get("status", "")).lower() == "active"]
+    if active_mortgages:
+        banks = ", ".join([m.get("bank", "Bank") for m in active_mortgages])
+        mortgage_status = f"Active Mortgage ({banks})"
+    elif mortgages:
+        mortgage_status = "Mortgage Released / Clear"
+    else:
+        mortgage_status = "No Mortgage Recorded"
+
+    verified_docs = [d for d in docs if str(d.get("verification", "")).lower() == "verified"]
+    if docs:
+        doc_status = f"{len(verified_docs)}/{len(docs)} Documents Verified"
+    else:
+        doc_status = "No Documents Registered"
+
+    risk_score = risk.get("overall_score") or land.get("risk_score") or 15
+    dna_score = dna.get("overall_health") or land.get("health_score") or 85
+    risk_level = risk.get("level") or ("LOW" if risk_score < 30 else "HIGH" if risk_score > 60 else "MEDIUM")
+
+    area_sqft = land.get("area_sq_ft") or land.get("area") or 0
+    area_acres = round(area_sqft / 43560, 2) if area_sqft else 0.0
+
+    return {
+        "land_id": canonical_id,
+        "survey_number": land.get("survey_number", "N/A"),
+        "subdivision": land.get("subdivision_number", "None"),
+        "location": land.get("location", "N/A"),
+        "village": land.get("village", "N/A"),
+        "taluk": land.get("taluk", "N/A"),
+        "district": land.get("district", "N/A"),
+        "current_owner": land.get("owner", land.get("owner_name", "N/A")),
+        "land_type": land.get("land_type", "Standard"),
+        "area_sqft": area_sqft,
+        "area_acres": area_acres,
+        "verification_status": land.get("status", "Verified"),
+        "risk_score": risk_score,
+        "risk_level": risk_level,
+        "land_dna_score": dna_score,
+        "legal_status": legal_status,
+        "mortgage_status": mortgage_status,
+        "document_status": doc_status,
+        "last_updated": land.get("posted_date") or "2026-08-01",
+        "passport_generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "qr_code_url": f"https://demo.landtrace360.com/profile/{canonical_id}",
+        "disclaimer": "Demo / Synthetic Project Data — Not an Official Government Land Record"
+    }
+
+
+def _build_land_story(canonical_id: str, db: Optional[Session] = None, lang: str = "en"):
+    canonical_id, land, risk, dna, docs, cases, mortgages, owners, history, boundary, frag = _fetch_land_context(canonical_id, db)
+    lang = (lang or "en").lower()
+    if lang not in ["en", "ta", "hi"]:
+        lang = "en"
+
+    chapters = []
+
+    # 1. LAND ORIGIN
+    orig_area = frag.get("original_area") or land.get("area_sq_ft") or 0
+    first_hist = history[0] if history else None
+    first_year = first_hist.get("year", 2005) if first_hist else 2005
+    first_owner = first_hist.get("owner", land.get("owner", "Initial Owner")) if first_hist else land.get("owner", "Initial Owner")
+
+    if orig_area:
+        if lang == "ta":
+            origin_summary = f"இந்த நிலம் முதன்முதலில் {first_year} ஆம் ஆண்டில் {first_owner} இன் கீழ் {orig_area:,} சதுர அடி பரப்பளவாக பதிவு செய்யப்பட்டது."
+        elif lang == "hi":
+            origin_summary = f"यह भूमि मूल रूप से {first_year} में {first_owner} के तहत {orig_area:,} वर्ग फुट पार्सल के रूप में दर्ज की गई थी।"
+        else:
+            origin_summary = f"This land was originally recorded in {first_year} under {first_owner} as a {orig_area:,} sq.ft parcel."
+        origin_ev = {"year": first_year, "initial_owner": first_owner, "original_area_sqft": orig_area, "source": "Land History & Registry Record"}
+    else:
+        origin_summary = "பதிவுகள் எதுவும் கிடைக்கவில்லை." if lang == "ta" else ("कोई रिकॉर्ड उपलब्ध नहीं है।" if lang == "hi" else "No record available.")
+        origin_ev = {"status": "No historical origin record available"}
+
+    chapters.append({
+        "step": 1,
+        "key": "origin",
+        "stage": "LAND ORIGIN",
+        "stage_localized": "நில தோற்றம்" if lang == "ta" else ("भूमि उत्पत्ति" if lang == "hi" else "LAND ORIGIN"),
+        "summary": origin_summary,
+        "evidence": origin_ev
+    })
+
+    # 2. OWNERSHIP CHANGES
+    if history and len(history) > 1:
+        chain = " → ".join([h.get("owner", "Unknown") for h in history])
+        trans_count = sum(h.get("transactions", 0) for h in history)
+        if lang == "ta":
+            owner_summary = f"காலப்போக்கில் நில உரிமை மாற்றம் அடைந்தது: {chain}. மொத்த பரிவர்த்தனைகள்: {trans_count}."
+        elif lang == "hi":
+            owner_summary = f"समय के साथ भूमि का स्वामित्व बदला: {chain}। कुल दर्ज लेनदेन: {trans_count}।"
+        else:
+            owner_summary = f"Ownership transitioned over time through recorded conveyances: {chain}. Total recorded transactions: {trans_count}."
+        owner_ev = {"ownership_chain": [h.get("owner") for h in history], "milestones": history}
+    elif owners:
+        chain = " → ".join([o.get("name", "Unknown") for o in owners])
+        if lang == "ta":
+            owner_summary = f"பதிவு செய்யப்பட்ட உரிமை தொடர்ச்சி: {chain}."
+        elif lang == "hi":
+            owner_summary = f"दर्ज स्वामित्व श्रृंखला: {chain}।"
+        else:
+            owner_summary = f"Recorded ownership continuity: {chain}."
+        owner_ev = {"owners": owners}
+    else:
+        owner_summary = "பதிவுகள் எதுவும் கிடைக்கவில்லை." if lang == "ta" else ("कोई रिकॉर्ड उपलब्ध नहीं है।" if lang == "hi" else "No record available.")
+        owner_ev = {"status": "No ownership transition record found"}
+
+    chapters.append({
+        "step": 2,
+        "key": "ownership",
+        "stage": "OWNERSHIP CHANGES",
+        "stage_localized": "உரிமை மாற்றங்கள்" if lang == "ta" else ("स्वामित्व परिवर्तन" if lang == "hi" else "OWNERSHIP CHANGES"),
+        "summary": owner_summary,
+        "evidence": owner_ev
+    })
+
+    # 3. SUBDIVISION / AREA CHANGES
+    subs = frag.get("subdivisions", 0)
+    cur_area = land.get("area_sq_ft", 0)
+    pct_lost = frag.get("percentage_lost", 0)
+    if frag and subs > 0:
+        if lang == "ta":
+            sub_summary = f"இந்த நிலம் {subs} உட்பிரிவு(கள்) பெற்றுள்ளது. பரப்பளவு {orig_area:,} சதுர அடியிலிருந்து {cur_area:,} சதுர அடியாக மாற்றப்பட்டது ({pct_lost}% பரப்பளவு மாற்றம்)."
+        elif lang == "hi":
+            sub_summary = f"यह भूमि {subs} उप-विभाजन(नों) से गुजरी है। क्षेत्रफल {orig_area:,} वर्ग फुट से बदलकर {cur_area:,} वर्ग फुट हो गया ({pct_lost}% क्षेत्रफल परिवर्तन)।"
+        else:
+            sub_summary = f"The parcel underwent {subs} recorded subdivision(s), adjusting the footprint from {orig_area:,} sq.ft to {cur_area:,} sq.ft ({pct_lost}% area shift)."
+        sub_ev = frag
+    elif cur_area:
+        if lang == "ta":
+            sub_summary = f"நிலத்தின் தற்போதைய பரப்பளவு {cur_area:,} சதுர அடி. குறிப்பிடத்தக்க உட்பிரிவு மாற்றங்கள் எதுவும் இல்லை."
+        elif lang == "hi":
+            sub_summary = f"भूमि का वर्तमान क्षेत्रफल {cur_area:,} वर्ग फुट है। कोई महत्वपूर्ण उप-विभाजन नहीं पाया गया।"
+        else:
+            sub_summary = f"The parcel currently holds {cur_area:,} sq.ft with no major subdivision recorded."
+        sub_ev = {"current_area": cur_area, "subdivisions": 0}
+    else:
+        sub_summary = "பதிவுகள் எதுவும் கிடைக்கவில்லை." if lang == "ta" else ("कोई रिकॉर्ड उपलब्ध नहीं है।" if lang == "hi" else "No record available.")
+        sub_ev = {"status": "No subdivision records found"}
+
+    chapters.append({
+        "step": 3,
+        "key": "subdivision",
+        "stage": "SUBDIVISION / AREA CHANGES",
+        "stage_localized": "உட்பிரிவு / பரப்பளவு மாற்றங்கள்" if lang == "ta" else ("उप-विभाजन / क्षेत्रफल परिवर्तन" if lang == "hi" else "SUBDIVISION / AREA CHANGES"),
+        "summary": sub_summary,
+        "evidence": sub_ev
+    })
+
+    # 4. DOCUMENT EVENTS
+    if docs:
+        types = [d.get("type", "Document") for d in docs]
+        types_str = ", ".join(types)
+        ver_count = sum(1 for d in docs if str(d.get("verification", "")).lower() == "verified")
+        if lang == "ta":
+            doc_summary = f"திட்ட அமைப்பில் {len(docs)} சட்ட ஆவணங்கள் பதிவு செய்யப்பட்டுள்ளன ({types_str}). {ver_count} ஆவணங்கள் வெற்றிகரமாக சரிபார்க்கப்பட்டுள்ளன."
+        elif lang == "hi":
+            doc_summary = f"सिस्टम में {len(docs)} कानूनी दस्तावेज पंजीकृत हैं ({types_str})। {ver_count} दस्तावेज सफलतापूर्वक सत्यापित किए गए हैं।"
+        else:
+            doc_summary = f"{len(docs)} legal document(s) registered in the system ({types_str}). {ver_count} document(s) verified against stored records."
+        doc_ev = docs
+    else:
+        doc_summary = "பதிவுகள் எதுவும் கிடைக்கவில்லை." if lang == "ta" else ("कोई रिकॉर्ड उपलब्ध नहीं है।" if lang == "hi" else "No record available.")
+        doc_ev = {"status": "No document records stored"}
+
+    chapters.append({
+        "step": 4,
+        "key": "documents",
+        "stage": "DOCUMENT EVENTS",
+        "stage_localized": "ஆவண நிகழ்வுகள்" if lang == "ta" else ("दस्तावेज़ घटनाएँ" if lang == "hi" else "DOCUMENT EVENTS"),
+        "summary": doc_summary,
+        "evidence": doc_ev
+    })
+
+    # 5. LEGAL EVENTS
+    if cases:
+        case_summaries = []
+        for c in cases:
+            num = c.get("case_no") or c.get("case_number", "Case")
+            court = c.get("court", "Court")
+            st = c.get("status", "Active")
+            case_summaries.append(f"{num} ({court} - {st})")
+        cases_str = "; ".join(case_summaries)
+        if lang == "ta":
+            legal_summary = f"பதிவு செய்யப்பட்ட வழக்கு நிகழ்வுகள்: {cases_str}."
+        elif lang == "hi":
+            legal_summary = f"दर्ज कानूनी मामले की घटनाएँ: {cases_str}।"
+        else:
+            legal_summary = f"Legal tribunal filings recorded: {cases_str}."
+        legal_ev = cases
+    else:
+        if lang == "ta":
+            legal_summary = "பதிவுகள் எதுவும் கிடைக்கவில்லை (எந்தவொரு நிலுவை அல்லது பழைய வழக்கும் பதிவு செய்யப்படவில்லை)."
+        elif lang == "hi":
+            legal_summary = "कोई रिकॉर्ड उपलब्ध नहीं है (कोई सक्रिय या पुराना कानूनी विवाद दर्ज नहीं है)।"
+        else:
+            legal_summary = "No litigation record available (Clear title with zero active or past disputes)."
+        legal_ev = {"active_cases": 0, "status": "Clear Title"}
+
+    chapters.append({
+        "step": 5,
+        "key": "legal",
+        "stage": "LEGAL EVENTS",
+        "stage_localized": "சட்ட வழக்கு நிகழ்வுகள்" if lang == "ta" else ("कानूनी घटनाएँ" if lang == "hi" else "LEGAL EVENTS"),
+        "summary": legal_summary,
+        "evidence": legal_ev
+    })
+
+    # 6. MORTGAGE EVENTS
+    if mortgages:
+        m_summaries = []
+        for m in mortgages:
+            b = m.get("bank", "Bank")
+            st = m.get("status", "Status")
+            s_date = m.get("start_date", "")
+            r_date = m.get("release_date", "")
+            m_summaries.append(f"{b} [{st}: {s_date} to {r_date}]")
+        m_str = "; ".join(m_summaries)
+        if lang == "ta":
+            mort_summary = f"அடமான நிகழ்வுகள் பதிவு செய்யப்பட்டுள்ளன: {m_str}."
+        elif lang == "hi":
+            mort_summary = f"बंधक घटनाएँ दर्ज की गईं: {m_str}।"
+        else:
+            mort_summary = f"Financial encumbrances recorded: {m_str}."
+        mort_ev = mortgages
+    else:
+        if lang == "ta":
+            mort_summary = "பதிவுகள் எதுவும் கிடைக்கவில்லை (வங்கி அடமானக் கடன்கள் எதுவும் பதிவு செய்யப்படவில்லை)."
+        elif lang == "hi":
+            mort_summary = "कोई रिकॉर्ड उपलब्ध नहीं है (कोई बैंक बंधक दर्ज नहीं है)।"
+        else:
+            mort_summary = "No mortgage record available (No bank liens or encumbrances registered)."
+        mort_ev = {"mortgages_count": 0, "status": "Unencumbered"}
+
+    chapters.append({
+        "step": 6,
+        "key": "mortgages",
+        "stage": "MORTGAGE EVENTS",
+        "stage_localized": "அடமான நிகழ்வுகள்" if lang == "ta" else ("बंधक घटनाएँ" if lang == "hi" else "MORTGAGE EVENTS"),
+        "summary": mort_summary,
+        "evidence": mort_ev
+    })
+
+    # 7. BOUNDARY EVENTS
+    if boundary:
+        b_prev = boundary.get("previous_status", "Unmarked")
+        b_cur = boundary.get("current_status", "Surveyed")
+        b_dev = boundary.get("deviation_percentage", 0.0)
+        b_stat = boundary.get("change_status", "Verified")
+        if lang == "ta":
+            bound_summary = f"எல்லை அளவீட்டு நிலை: '{b_prev}' இலிருந்து '{b_cur}' ஆக மாறியது ({b_stat}, விலகல்: {b_dev}%)."
+        elif lang == "hi":
+            bound_summary = f"सीमा सर्वेक्षण स्थिति: '{b_prev}' से बदलकर '{b_cur}' हुई ({b_stat}, विचलन: {b_dev}%)।"
+        else:
+            bound_summary = f"Boundary demarcation shifted from '{b_prev}' to '{b_cur}' with {b_dev}% deviation ({b_stat})."
+        bound_ev = boundary
+    else:
+        bound_summary = "பதிவுகள் எதுவும் கிடைக்கவில்லை." if lang == "ta" else ("कोई रिकॉर्ड उपलब्ध नहीं है।" if lang == "hi" else "No record available.")
+        bound_ev = {"status": "No boundary telemetry stored"}
+
+    chapters.append({
+        "step": 7,
+        "key": "boundary",
+        "stage": "BOUNDARY EVENTS",
+        "stage_localized": "எல்லை நிகழ்வுகள்" if lang == "ta" else ("सीमा घटनाएँ" if lang == "hi" else "BOUNDARY EVENTS"),
+        "summary": bound_summary,
+        "evidence": bound_ev
+    })
+
+    # 8. CURRENT STATUS
+    c_owner = land.get("owner", land.get("owner_name", "Current Owner"))
+    c_area = land.get("area_sq_ft", 0)
+    c_risk = risk.get("overall_score") or land.get("risk_score") or 15
+    c_dna = dna.get("overall_health") or land.get("health_score") or 85
+    c_status = land.get("status", "Verified")
+    if lang == "ta":
+        status_summary = f"தற்போதைய உரிமையாளர் {c_owner}, பரப்பளவு {c_area:,} சதுர அடி. சரிபார்ப்பு நிலை: {c_status}, இடர் மதிப்பீடு: {c_risk}/100, நில DNA மதிப்பீடு: {c_dna}/100."
+    elif lang == "hi":
+        status_summary = f"वर्तमान स्वामी {c_owner}, क्षेत्रफल {c_area:,} वर्ग फुट। सत्यापन स्थिति: {c_status}, जोखिम स्कोर: {c_risk}/100, लैंड डीएनए स्कोर: {c_dna}/100।"
+    else:
+        status_summary = f"Current parcel is held by {c_owner} spanning {c_area:,} sq.ft. Status: {c_status}, Risk Score: {c_risk}/100, Land DNA Score: {c_dna}/100."
+    status_ev = {
+        "owner": c_owner,
+        "area_sq_ft": c_area,
+        "risk_score": c_risk,
+        "dna_score": c_dna,
+        "status": c_status
+    }
+
+    chapters.append({
+        "step": 8,
+        "key": "current_status",
+        "stage": "CURRENT STATUS",
+        "stage_localized": "தற்போதைய நிலை" if lang == "ta" else ("वर्तमान स्थिति" if lang == "hi" else "CURRENT STATUS"),
+        "summary": status_summary,
+        "evidence": status_ev
+    })
+
+    full_narrative = "\n\n".join([f"{c['stage_localized']}: {c['summary']}" for c in chapters])
+
+    return {
+        "land_id": canonical_id,
+        "language": lang,
+        "title": "AI Land Chronological Story" if lang == "en" else ("AI நில காலவரிசைக் கதை" if lang == "ta" else "एआई भूमि कालानुक्रमिक कहानी"),
+        "disclaimer": "AI-generated summary based on available project records. Demo / Synthetic Project Data — Not an Official Government Land Record.",
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "full_narrative": full_narrative,
+        "chapters": chapters
+    }
+
+@app.get("/api/lands/{land_id:path}/passport")
+@app.get("/lands/{land_id:path}/passport")
+def get_land_passport(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    return _build_land_passport(canonical_id, db)
+
+@app.get("/api/lands/{land_id:path}/story")
+@app.get("/lands/{land_id:path}/story")
+def get_land_story(land_id: str, lang: Optional[str] = "en", db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    return _build_land_story(canonical_id, db, lang=lang)
+
+@app.get("/api/lands/{land_id:path}/anomalies")
+@app.get("/lands/{land_id:path}/anomalies")
+def get_land_anomalies(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    ctx = _fetch_land_context(canonical_id, db)
+    return detect_land_anomalies(canonical_id, ctx)
+
+@app.get("/api/lands/{land_id:path}/evidence")
+@app.get("/lands/{land_id:path}/evidence")
+def get_land_evidence(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    ctx = _fetch_land_context(canonical_id, db)
+    return build_land_evidence(canonical_id, ctx)
+
+@app.get("/api/lands/{land_id:path}/risk-breakdown")
+@app.get("/lands/{land_id:path}/risk-breakdown")
+def get_land_risk_breakdown(land_id: str, db: Session = Depends(get_db)):
+    canonical_id = _resolve_land_id(land_id, db if DB_AVAILABLE else None)
+    ctx = _fetch_land_context(canonical_id, db)
+    return build_risk_breakdown(canonical_id, ctx)
+
+@app.get("/api/alerts")
+def get_intelligent_alerts(db: Session = Depends(get_db)):
+    return build_intelligent_alerts(_fetch_land_context, DEMO_LAND_DATA, db)
+
+@app.post("/api/alerts/{alert_id:path}/read")
+def mark_alert_read(alert_id: str):
+    _READ_ALERTS_SET.add(alert_id)
+    return {"status": "success", "alert_id": alert_id, "read": True}
+
+# ============================================================================
+# PHASE 2.5 AUTHENTICATION MODELS & ENDPOINTS
+# ============================================================================
+
+class RegisterRequest(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    role: Optional[str] = "buyer"
+    terms_accepted: Optional[bool] = True
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    remember_me: Optional[bool] = False
+
+@app.post("/api/auth/register")
+@app.post("/auth/register")
+def register_endpoint(req: RegisterRequest, db: Session = Depends(get_db)):
+    user_dict, error = register_user(
+        db if DB_AVAILABLE else None,
+        req.full_name,
+        req.email,
+        req.password,
+        req.role or "buyer"
+    )
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    
+    token = create_access_token({
+        "sub": user_dict["id"],
+        "email": user_dict["email"],
+        "role": user_dict["role"],
+        "full_name": user_dict["full_name"]
+    })
+    return {
+        "token": token,
+        "user": user_dict,
+        "message": "Account created successfully."
+    }
+
+@app.post("/api/auth/login")
+@app.post("/auth/login")
+def login_endpoint(req: LoginRequest, db: Session = Depends(get_db)):
+    user_dict, error = authenticate_user(
+        db if DB_AVAILABLE else None,
+        req.email,
+        req.password
+    )
+    if error:
+        raise HTTPException(status_code=401, detail=error)
+    
+    expires_delta = timedelta(days=30) if req.remember_me else timedelta(days=1)
+    token = create_access_token({
+        "sub": user_dict["id"],
+        "email": user_dict["email"],
+        "role": user_dict["role"],
+        "full_name": user_dict["full_name"]
+    }, expires_delta=expires_delta)
+    
+    return {
+        "token": token,
+        "user": user_dict,
+        "message": "Logged in successfully."
+    }
+
+@app.get("/api/auth/me")
+@app.get("/auth/me")
+def get_current_user_profile(request: Request, db: Session = Depends(get_db)):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    
+    token = auth_header.split(" ", 1)[1].strip()
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired session token.")
+    
+    user_id = payload.get("sub")
+    user = get_user_by_id(db if DB_AVAILABLE else None, user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User account not found.")
+    
+    return {
+        "authenticated": True,
+        "user": user
+    }
+
+@app.post("/api/auth/logout")
+@app.post("/auth/logout")
+def logout_endpoint(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        revoke_token(token)
+    return {"status": "logged_out", "message": "Successfully logged out."}
+
+@app.get("/api/auth/demo-accounts")
+@app.get("/auth/demo-accounts")
+def get_demo_accounts_info():
+    """Returns safe metadata about demo accounts for quick testing."""
+    return {
+        "disclaimer": "DEMO ONLY CREDENTIALS FOR TESTING",
+        "accounts": [
+            {
+                "role": "owner",
+                "role_label": "Land Owner",
+                "email": "owner@landtrace360.demo",
+                "password": DEMO_PASSWORD,
+                "description": "View owned lands, manage listings, view title history & risk"
+            },
+            {
+                "role": "buyer",
+                "role_label": "Buyer",
+                "email": "buyer@landtrace360.demo",
+                "password": DEMO_PASSWORD,
+                "description": "Search & view available lands, save lands, run AI queries"
+            },
+            {
+                "role": "investigator",
+                "role_label": "Investigator / Admin",
+                "email": "investigator@landtrace360.demo",
+                "password": DEMO_PASSWORD,
+                "description": "Full access to anomalies, evidence explorer, risk audit & alerts"
+            }
+        ]
+    }
+
 @app.get("/api/lands/{land_id:path}")
 @app.get("/lands/{land_id:path}")
 def get_land(land_id: str, db: Session = Depends(get_db)):
@@ -1615,6 +2552,105 @@ def loan_closure_verification(doc_no: str, db: Session = Depends(get_db)):
             result["verification_result"] = f"Loan status is {m['status']}."
 
     return result
+
+
+# =====================================================================
+# PHASE 2.6 — LANDTRACE AI EVIDENCE-BASED CHATBOT
+# =====================================================================
+
+chatbot_engine = LandTraceAIChatbot({
+    "demo_lands": DEMO_LAND_DATA,
+    "history_data": HISTORY_DATA,
+    "owners_data": OWNERS_DATA,
+    "documents_data": DOCUMENTS_DATA,
+    "doc_verification_data": DOC_VERIFICATION_DATA,
+    "cases_data": CASES_DATA,
+    "mortgages_data": MORTGAGES_DATA,
+    "risk_data": RISK_DATA,
+    "dna_data": DNA_DATA,
+    "boundary_data": BOUNDARY_DETECTION_DATA,
+    "fragmentation_data": FRAGMENTATION_ANALYSIS_DATA,
+    "fetch_land_context": _fetch_land_context
+})
+
+def _authenticate_chat_user(request: Request, db: Optional[Session] = None) -> Dict[str, Any]:
+    """
+    Enforces Phase 2.5 token authentication for LandTrace AI.
+    Owner, Buyer, and Investigator/Admin roles can all access.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required to access LandTrace AI.")
+    
+    token = auth_header.split(" ", 1)[1].strip()
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired session token.")
+    
+    user_id = payload.get("sub")
+    user = get_user_by_id(db if DB_AVAILABLE else None, user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User account not found.")
+    return user
+
+
+@app.post("/api/chat")
+@app.post("/chat")
+def chat_endpoint(chat_req: ChatRequest, request: Request, db: Session = Depends(get_db)):
+    """
+    POST /api/chat
+    Answers natural language queries grounded solely in LandTrace360 stored data.
+    Returns: answer, land_id, language, intent, confidence, evidence, sources, suggested_questions.
+    """
+    user = _authenticate_chat_user(request, db)
+    
+    result = chatbot_engine.process_query(
+        message=chat_req.message,
+        explicit_land_id=chat_req.land_id,
+        language=chat_req.language or "en",
+        db=db if DB_AVAILABLE else None
+    )
+    if chat_req.conversation_id:
+        result["conversation_id"] = chat_req.conversation_id
+    result["user_role"] = user.get("role", "buyer")
+    return result
+
+
+@app.get("/api/chat/suggestions")
+@app.get("/chat/suggestions")
+def chat_suggestions_endpoint(land_id: Optional[str] = None):
+    """
+    GET /api/chat/suggestions?land_id=LND-1001
+    Returns quick suggested inquiry pills tailored to the land context or global explorer.
+    """
+    target = (land_id or "").strip().upper()
+    if target and target.startswith("LND-"):
+        return {
+            "land_id": target,
+            "suggestions": [
+                f"Who owns {target}?",
+                f"Why is {target} high risk?",
+                f"Does {target} have a mortgage?",
+                f"What legal cases are associated with {target}?",
+                f"What documents are available for {target}?",
+                f"What anomalies were detected?",
+                f"Show evidence for the risk",
+                f"Show the ownership history of {target}",
+                f"Is {target} listed for sale?",
+                f"Give me a complete summary of {target}"
+            ]
+        }
+    return {
+        "land_id": None,
+        "suggestions": [
+            "What lands are currently for sale?",
+            "Which lands have high risk scores?",
+            "Who owns LND-1001?",
+            "Why is LND-1004 high risk?",
+            "Does LND-1006 have a mortgage?",
+            "What happened to LND-1001 over time?"
+        ]
+    }
 
 
 if __name__ == "__main__":

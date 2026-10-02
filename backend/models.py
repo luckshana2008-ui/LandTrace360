@@ -146,3 +146,15 @@ class SellerDocumentUpload(Base):
     uploaded_at = Column(String)
     verification_status = Column(String, default="Pending")
     notes = Column(Text, nullable=True)
+
+class User(Base):
+    """User account model for authentication and role-based permissions."""
+    __tablename__ = "users"
+    id = Column(String, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    full_name = Column(String, nullable=False)
+    role = Column(String, nullable=False, default="buyer")  # 'owner', 'buyer', 'investigator'
+    hashed_password = Column(String, nullable=False)
+    salt = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
