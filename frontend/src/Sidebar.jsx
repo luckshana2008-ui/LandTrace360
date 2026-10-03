@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Home, Search, ShoppingCart, Target, Bookmark, MessageSquare,
   Bell, FileText, ShieldCheck, X, Shield, Sparkles, Compass,
@@ -7,10 +7,21 @@ import {
 import { useLanguage } from './i18n/LanguageContext';
 import { useAuth } from './context/AuthContext';
 import LanguageSelector from './components/LanguageSelector';
+import { useState } from 'react';
 
 const Sidebar = ({ isOpen, closeSidebar }) => {
   const { t } = useLanguage();
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    closeSidebar();
+    setLoggingOut(true);
+    await logout();
+    setLoggingOut(false);
+    navigate('/login', { replace: true });
+  };
 
   return (
     <div className={`sidebar ${isOpen ? 'open' : ''}`} style={{ display: 'flex', flexDirection: 'column' }}>
@@ -171,10 +182,9 @@ const Sidebar = ({ isOpen, closeSidebar }) => {
           </div>
 
           <button
-            onClick={() => {
-              closeSidebar();
-              logout();
-            }}
+            id="btn-sidebar-logout"
+            onClick={handleLogout}
+            disabled={loggingOut}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -187,13 +197,14 @@ const Sidebar = ({ isOpen, closeSidebar }) => {
               color: '#f87171',
               fontSize: '0.8rem',
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: loggingOut ? 'not-allowed' : 'pointer',
               transition: 'all 0.15s ease',
-              width: '100%'
+              width: '100%',
+              opacity: loggingOut ? 0.65 : 1
             }}
           >
             <LogOut size={14} />
-            Sign Out
+            {loggingOut ? 'Signing out...' : 'Sign Out'}
           </button>
         </div>
       )}
