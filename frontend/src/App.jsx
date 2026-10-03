@@ -16,6 +16,8 @@ import AnomalyDetectivePage from './pages/AnomalyDetectivePage';
 import EvidenceExplorerPage from './pages/EvidenceExplorerPage';
 import RiskBreakdownPage from './pages/RiskBreakdownPage';
 import LandTraceAIPage from './pages/LandTraceAIPage';
+import CoimbatoreCadastralMap from './pages/CoimbatoreCadastralMap';
+import PredictiveAnalysisPage from './pages/PredictiveAnalysisPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -55,6 +57,8 @@ function App() {
                 <Route path="intelligence/evidence" element={<Navigate to="/evidence" replace />} />
                 <Route path="risk-breakdown" element={<RiskBreakdownPage />} />
                 <Route path="intelligence/risk-breakdown" element={<Navigate to="/risk-breakdown" replace />} />
+                <Route path="coimbatore-map" element={<CoimbatoreCadastralMap />} />
+                <Route path="predictive-analysis" element={<PredictiveAnalysisPage />} />
                 <Route path="chat" element={<LandTraceAIPage />} />
                 <Route path="intelligence/chat" element={<Navigate to="/chat" replace />} />
                 <Route path="land/:id" element={<LandProfileWrapper />} />

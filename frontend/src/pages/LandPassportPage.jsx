@@ -33,6 +33,8 @@ const LandPassportPage = () => {
     setSearchParams({ id });
   };
 
+  const availableIds = lands.length > 0 ? lands.map((l) => l.id) : DEMO_LAND_IDS;
+
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       {/* Header */}
@@ -85,7 +87,7 @@ const LandPassportPage = () => {
           {t('common.selectLand', 'Select Land Record')}:
         </span>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          {DEMO_LAND_IDS.map((lid) => {
+          {availableIds.map((lid) => {
             const isSelected = lid === selectedLandId;
             return (
               <button

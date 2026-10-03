@@ -15,11 +15,25 @@ const AILandStoryPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedParam = searchParams.get('id') || 'LND-1001';
   const [selectedLandId, setSelectedLandId] = useState(selectedParam);
+  const [lands, setLands] = useState([]);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/lands`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setLands(data);
+        }
+      })
+      .catch(console.error);
+  }, []);
 
   const handleSelect = (id) => {
     setSelectedLandId(id);
     setSearchParams({ id });
   };
+
+  const availableIds = lands.length > 0 ? lands.map(l => l.id) : DEMO_LAND_IDS;
 
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -73,7 +87,7 @@ const AILandStoryPage = () => {
           {t('common.selectLand', 'Select Land Record')}:
         </span>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          {DEMO_LAND_IDS.map((lid) => {
+          {availableIds.map((lid) => {
             const isSelected = lid === selectedLandId;
             return (
               <button

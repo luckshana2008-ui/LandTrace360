@@ -1,0 +1,119 @@
+{
+  "history": {
+    "LND-1001": [
+      { "year": 2005, "owner": "Govt IT Dept", "status": "Registered", "transactions": 0, "risk_score": 10, "boundary_status": "Unmarked" },
+      { "year": 2015, "owner": "TechSpace Inc.", "status": "Transferred", "transactions": 1, "risk_score": 12, "boundary_status": "Surveyed" },
+      { "year": 2026, "owner": "TechSpace Inc.", "status": "Verified", "transactions": 1, "risk_score": 15, "boundary_status": "Fenced" }
+    ],
+    "LND-1002": [
+      { "year": 2005, "owner": "Kumar Ancestral", "status": "Agricultural", "transactions": 0, "risk_score": 20, "boundary_status": "Unmarked" },
+      { "year": 2018, "owner": "Ramesh Kumar", "status": "Inherited", "transactions": 1, "risk_score": 35, "boundary_status": "Partially Marked" },
+      { "year": 2026, "owner": "Ramesh Kumar", "status": "Pending Verification", "transactions": 1, "risk_score": 45, "boundary_status": "Disputed Line" }
+    ],
+    "LND-1003": [
+      { "year": 2010, "owner": "City Developers", "status": "Plotting", "transactions": 0, "risk_score": 5, "boundary_status": "Surveyed" },
+      { "year": 2020, "owner": "Sarah Smith", "status": "Purchased", "transactions": 1, "risk_score": 5, "boundary_status": "Fenced" },
+      { "year": 2026, "owner": "Sarah Smith", "status": "Verified", "transactions": 1, "risk_score": 5, "boundary_status": "Gated" }
+    ],
+    "LND-1004": [
+      { "year": 1995, "owner": "State Industrial Board", "status": "Allotted", "transactions": 0, "risk_score": 25, "boundary_status": "Unmarked" },
+      { "year": 2005, "owner": "HeavyCorp Ltd.", "status": "Lease Hold", "transactions": 1, "risk_score": 60, "boundary_status": "Encroached" },
+      { "year": 2026, "owner": "HeavyCorp Ltd.", "status": "Contested", "transactions": 2, "risk_score": 85, "boundary_status": "Litigation Enjoined" }
+    ],
+    "LND-1005": [
+      { "year": 2005, "owner": "Patel Family", "status": "Vacant Plot", "transactions": 0, "risk_score": 15, "boundary_status": "Unmarked" },
+      { "year": 2015, "owner": "Patel Family", "status": "Residential", "transactions": 0, "risk_score": 12, "boundary_status": "Surveyed" },
+      { "year": 2026, "owner": "Amit Patel", "status": "Verified", "transactions": 1, "risk_score": 10, "boundary_status": "Fenced" }
+    ],
+    "LND-1006": [
+      { "year": 2005, "owner": "City Municipal Corp", "status": "Public Land", "transactions": 0, "risk_score": 30, "boundary_status": "Unmarked" },
+      { "year": 2015, "owner": "Waterside Holdings", "status": "Leased", "transactions": 1, "risk_score": 28, "boundary_status": "Surveyed" },
+      { "year": 2026, "owner": "Riverfront Developers", "status": "Verified", "transactions": 2, "risk_score": 25, "boundary_status": "Fenced" }
+    ],
+    "LND-1007": [
+      { "year": 2005, "owner": "Sharma Family Estate", "status": "Ancestral Property", "transactions": 0, "risk_score": 50, "boundary_status": "Unmarked" },
+      { "year": 2015, "owner": "Kavita Sharma", "status": "Inherited", "transactions": 1, "risk_score": 55, "boundary_status": "Partially Marked" },
+      { "year": 2026, "owner": "Kavita Sharma", "status": "Pending Verification", "transactions": 2, "risk_score": 55, "boundary_status": "Surveyed" }
+    ],
+    "LND-1008": [
+      { "year": 2005, "owner": "Airport Authority", "status": "Reserved Land", "transactions": 0, "risk_score": 25, "boundary_status": "Unmarked" },
+      { "year": 2015, "owner": "Aero Infra Pvt Ltd", "status": "Leased", "transactions": 1, "risk_score": 22, "boundary_status": "Surveyed" },
+      { "year": 2026, "owner": "Global Logistics", "status": "Verified", "transactions": 2, "risk_score": 20, "boundary_status": "Fenced" }
+    ]
+  },
+  "owners": {
+    "LND-1001": [
+      { "name": "TechSpace Inc.", "period": "2015 - Present", "type": "Corporate" },
+      { "name": "Govt IT Dept", "period": "2000 - 2015", "type": "Government" }
+    ],
+    "LND-1002": [
+      { "name": "Ramesh Kumar", "period": "2018 - Present", "type": "Individual" },
+      { "name": "Kumar Ancestral Estate", "period": "1980 - 2018", "type": "Family" }
+    ],
+    "LND-1003": [
+      { "name": "Sarah Smith", "period": "2020 - Present", "type": "Individual" }
+    ],
+    "LND-1004": [
+      { "name": "HeavyCorp Ltd.", "period": "2005 - Present", "type": "Corporate" }
+    ],
+    "LND-1005": [
+      { "name": "Amit Patel", "period": "2015 - Present", "type": "Individual" }
+    ],
+    "LND-1006": [
+      { "name": "Riverfront Developers", "period": "2019 - Present", "type": "Corporate" }
+    ],
+    "LND-1007": [
+      { "name": "Kavita Sharma", "period": "2015 - Present", "type": "Individual" }
+    ],
+    "LND-1008": [
+      { "name": "Global Logistics", "period": "2020 - Present", "type": "Corporate" }
+    ]
+  },
+  "documents": {
+    "LND-1001": [
+      { "doc_no": "DOC-99812", "type": "Sale Deed", "date": "2015-04-12", "verification": "Verified", "result": "Match" },
+      { "doc_no": "DOC-33211", "type": "Encumbrance Certificate", "date": "2026-01-10", "verification": "Verified", "result": "Match" }
+    ],
+    "LND-1002": [
+      { "doc_no": "DOC-77442", "type": "Sale Deed", "date": "2018-09-22", "verification": "Pending", "result": "Mismatch" },
+      { "doc_no": "DOC-89912", "type": "Tax Receipt", "date": "2025-11-20", "verification": "Verified", "result": "Match" }
+    ],
+    "LND-1003": [
+      { "doc_no": "DOC-11234", "type": "Gift Deed", "date": "2020-02-14", "verification": "Verified", "result": "Match" },
+      { "doc_no": "DOC-11333", "type": "Property Tax Receipt", "date": "2025-02-28", "verification": "Verified", "result": "Match" }
+    ],
+    "LND-1004": [
+      { "doc_no": "DOC-55321", "type": "Sale Deed", "date": "1995-07-06", "verification": "Disputed", "result": "Mismatch" },
+      { "doc_no": "DOC-11983", "type": "Survey Report", "date": "2005-08-30", "verification": "Verified", "result": "Match" }
+    ]
+  },
+  "cases": {
+    "LND-1001": [{ "case_no": "OS-2026-11", "type": "Tax Reassessment", "court": "Municipal Tribunal", "filing_date": "2026-01-10", "status": "Closed" }],
+    "LND-1002": [{ "case_no": "OS-2025-88", "type": "Title Dispute", "court": "High Court", "filing_date": "2025-11-04", "status": "Ongoing" }],
+    "LND-1003": [{ "case_no": "OS-2024-55", "type": "Boundary Demarcation", "court": "Civil Court", "filing_date": "2024-05-16", "status": "Closed" }],
+    "LND-1004": [
+      { "case_no": "OS-2023-45", "type": "Boundary Dispute", "court": "District Court", "filing_date": "2023-06-15", "status": "Ongoing" },
+      { "case_no": "WP-2018-99", "type": "Environmental Clearance", "court": "Green Tribunal", "filing_date": "2018-09-10", "status": "Closed" }
+    ]
+  },
+  "mortgages": {
+    "LND-1001": [{ "bank": "National Bank", "start_date": "2016-01-01", "release_date": "2025-12-31", "status": "Released" }],
+    "LND-1002": [{ "bank": "Rural Credit Union", "start_date": "2019-11-11", "release_date": "2029-11-11", "status": "Active" }],
+    "LND-1003": [{ "bank": "City Finance", "start_date": "2021-08-20", "release_date": "2031-08-20", "status": "Active" }],
+    "LND-1004": [{ "bank": "Industrial Dev Bank", "start_date": "2015-05-15", "release_date": "2035-05-15", "status": "Active" }]
+  },
+  "risk": {
+    "LND-1001": { "document_risk": 5, "ownership_risk": 5, "legal_risk": 0, "mortgage_risk": 5, "boundary_risk": 0, "overall_score": 15, "level": "LOW" },
+    "LND-1004": { "document_risk": 20, "ownership_risk": 30, "legal_risk": 80, "mortgage_risk": 0, "boundary_risk": 85, "overall_score": 85, "level": "HIGH" }
+  },
+  "dna": {
+    "LND-1001": { "ownership_stability": 90, "document_health": 95, "legal_safety": 100, "mortgage_status": 85, "boundary_stability": 90, "overall_health": 92 },
+    "LND-1004": { "ownership_stability": 40, "document_health": 50, "legal_safety": 20, "mortgage_status": 100, "boundary_stability": 30, "overall_health": 48 }
+  },
+  "alerts": [
+    { "id": "ALT-001", "land_id": "LND-1004", "date": "2026-09-20", "title": "Legal Case Injunction", "message": "Active boundary hearing scheduled at District Court.", "type": "Legal Case", "read": false },
+    { "id": "ALT-002", "land_id": "LND-1002", "date": "2026-09-22", "title": "Boundary Discrepancy", "message": "FMB discrepancy noted between survey stone and digital record.", "type": "Boundary Change", "read": false },
+    { "id": "ALT-003", "land_id": "CBE-LND-2004", "date": "2026-09-25", "title": "DRT Bank Hypothecation", "message": "Mortgage recovery notification received for Singanallur parcel.", "type": "Mortgage", "read": false }
+  ],
+  "saved_lands": ["LND-1001", "CBE-LND-2001"]
+}

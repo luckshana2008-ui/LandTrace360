@@ -295,6 +295,19 @@ DEMO_LAND_DATA = [
     }
 ]
 
+# Remerge Coimbatore real land dataset if available
+try:
+    import json
+    _cbe_file = Path(__file__).resolve().parent.parent / "server" / "data" / "coimbatore_lands.json"
+    if _cbe_file.exists():
+        with open(_cbe_file, "r", encoding="utf-8") as _f:
+            _cbe_data = json.load(_f)
+            for _item in _cbe_data:
+                if not any(l["id"] == _item["id"] for l in DEMO_LAND_DATA):
+                    DEMO_LAND_DATA.append(_item)
+except Exception as _e:
+    pass
+
 HISTORY_DATA = {
     "LND-1001": [
         {"year": 2005, "owner": "Govt IT Dept", "status": "Registered", "transactions": 0, "risk_score": 10, "boundary_status": "Unmarked"},

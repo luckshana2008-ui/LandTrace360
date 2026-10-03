@@ -1,0 +1,70 @@
+[
+  {
+    "id": "LOC-ACC-101",
+    "land_id": "CBE-LND-2001",
+    "location_name": "Peelamedu Avinashi Road",
+    "coordinates": [
+      11.0315,
+      77.0125
+    ],
+    "access_type": "GPS_FIELD_AUDIT",
+    "status": "GRANTED",
+    "authorized_by": "Coimbatore District Revenue Officer",
+    "operator_name": "S. Rajesh Kumar (Licensed Cadastral Surveyor #TN-CBE-402)",
+    "purpose": "Routine Boundary Audit & Geo-coordinate Verification",
+    "timestamp": "2026-09-28T11:45:00+05:30",
+    "device_info": "Trimble Catalyst GNSS DA2 (Sub-meter RTK)",
+    "hash": "a4f89d3810c9e782bc4a8497d51e7021"
+  },
+  {
+    "id": "LOC-ACC-102",
+    "land_id": "CBE-LND-2002",
+    "location_name": "Saravanampatti Tech Zone",
+    "coordinates": [
+      11.0821,
+      76.9964
+    ],
+    "access_type": "BUYER_SITE_INSPECTION",
+    "status": "GRANTED",
+    "authorized_by": "LandTrace360 Digital Passport Token",
+    "operator_name": "Praveen V. (Verified Commercial Buyer)",
+    "purpose": "Pre-purchase Due Diligence Site Walk",
+    "timestamp": "2026-09-30T14:15:20+05:30",
+    "device_info": "Mobile Geolocation API (HTML5 W3C Standard)",
+    "hash": "b78d21c90ef44521ac0932da1e712399"
+  },
+  {
+    "id": "LOC-ACC-103",
+    "land_id": "CBE-LND-2004",
+    "location_name": "Singanallur Industrial Estate",
+    "coordinates": [
+      10.9984,
+      77.0216
+    ],
+    "access_type": "DISPUTE_LEGAL_INSPECTION",
+    "status": "RESTRICTED",
+    "authorized_by": "Debts Recovery Tribunal (DRT) Commissioner",
+    "operator_name": "Court Appointed Receiver Advocate",
+    "purpose": "Physical Asset Inventory for Case OS-104/2024",
+    "timestamp": "2026-09-15T10:00:00+05:30",
+    "device_info": "Garmin eTrex SE Handheld GPS",
+    "hash": "c91a78ff020112dd88726354ab910243"
+  },
+  {
+    "id": "LOC-ACC-104",
+    "land_id": "CBE-LND-2005",
+    "location_name": "Gandhipuram Cross Cut Road",
+    "coordinates": [
+      11.0183,
+      76.9654
+    ],
+    "access_type": "REGISTRATION_FIELD_CHECK",
+    "status": "GRANTED",
+    "authorized_by": "Gandhipuram Sub-Registrar Joint I",
+    "operator_name": "Sub-Registrar Inspection Squad",
+    "purpose": "Guideline Value & Physical Occupancy Assessment",
+    "timestamp": "2026-10-01T16:20:00+05:30",
+    "device_info": "TN Land Survey Tablet v4.2",
+    "hash": "d3489fe0082723acba10344577889122"
+  }
+]

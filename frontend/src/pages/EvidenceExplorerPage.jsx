@@ -101,9 +101,9 @@ const EvidenceExplorerPage = () => {
               cursor: 'pointer'
             }}
           >
-            {DEMO_LAND_IDS.map((lid) => {
-              const landObj = lands.find((l) => l.id === lid);
-              const label = landObj ? `${lid} — ${landObj.location} (${landObj.owner})` : lid;
+            {(lands.length > 0 ? lands : DEMO_LAND_IDS.map((lid) => ({ id: lid }))).map((landObj) => {
+              const lid = landObj.id;
+              const label = landObj.location ? `${lid} — ${landObj.location} (${landObj.owner})` : lid;
               return (
                 <option key={lid} value={lid} style={{ background: '#1e293b', color: '#ffffff' }}>
                   {label}

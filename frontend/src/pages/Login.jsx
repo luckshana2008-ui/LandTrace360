@@ -12,25 +12,36 @@ const DEMO_PASSWORD = "DemoPassword123!";
 
 const DEMO_CREDENTIALS = [
   {
-    roleKey: 'owner',
-    title: 'Land Owner',
-    email: 'owner@landtrace360.demo',
-    color: '#f59e0b',
-    desc: 'Manage listings, inspect land titles, documents & risk'
+    roleKey: 'investigator',
+    title: 'Revenue Officer / Admin',
+    email: 'admin@landtrace.in',
+    password: 'Admin@2026',
+    color: '#10b981',
+    desc: 'Full access: Coimbatore MapLibre, ML Suite, Audit & Anomalies'
   },
   {
     roleKey: 'buyer',
-    title: 'Buyer',
-    email: 'buyer@landtrace360.demo',
+    title: 'Kovai Land Investor (Buyer)',
+    email: 'user@landtrace.in',
+    password: 'User@2026',
     color: '#38bdf8',
-    desc: 'Marketplace search, saved lands, time machine & AI assistant'
+    desc: 'Coimbatore Cadastral search, saved lands & Gemini AI'
   },
   {
-    roleKey: 'investigator',
-    title: 'Investigator / Admin',
-    email: 'investigator@landtrace360.demo',
+    roleKey: 'owner',
+    title: 'Land Owner / Seller',
+    email: 'owner@landtrace.in',
+    password: 'Owner@2026',
+    color: '#f59e0b',
+    desc: 'Manage listings, land passports & legal title documents'
+  },
+  {
+    roleKey: 'quick',
+    title: 'Quick 1-Click Test',
+    email: 'demo@landtrace.in',
+    password: '123456',
     color: '#c084fc',
-    desc: 'Audit anomalies, evidence explorer, risk breakdown & alerts'
+    desc: 'Instant test access with simple password'
   }
 ];
 
@@ -84,9 +95,9 @@ const Login = () => {
     }
   };
 
-  const handleQuickFill = (demoEmail, roleKey) => {
+  const handleQuickFill = (demoEmail, roleKey, demoPass) => {
     setEmail(demoEmail);
-    setPassword(DEMO_PASSWORD);
+    setPassword(demoPass || DEMO_PASSWORD);
     setActiveDemoRole(roleKey);
     setFormError('');
     clearError();
@@ -411,7 +422,7 @@ const Login = () => {
                 <button
                   key={demo.roleKey}
                   type="button"
-                  onClick={() => handleQuickFill(demo.email, demo.roleKey)}
+                  onClick={() => handleQuickFill(demo.email, demo.roleKey, demo.password)}
                   style={{
                     background: isSelected ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.03)',
                     border: isSelected ? `1px solid ${demo.color}` : '1px solid rgba(255, 255, 255, 0.06)',

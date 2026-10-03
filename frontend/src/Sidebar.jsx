@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   Home, Search, ShoppingCart, Target, Bookmark, MessageSquare,
   Bell, FileText, ShieldCheck, X, Shield, Sparkles, Compass,
-  ShieldAlert, Layers, LogOut, Bot, Activity
+  ShieldAlert, Layers, LogOut, Bot, Activity, MapPin, Cpu
 } from 'lucide-react';
 import { useLanguage } from './i18n/LanguageContext';
 import { useAuth } from './context/AuthContext';
@@ -78,6 +78,12 @@ const Sidebar = ({ isOpen, closeSidebar }) => {
           </NavLink>
           <NavLink to="/risk-breakdown" onClick={closeSidebar} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
             <Activity size={18} color="#fbbf24" /> {t('nav.riskBreakdown', 'Risk Breakdown')}
+          </NavLink>
+          <NavLink to="/coimbatore-map" onClick={closeSidebar} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+            <MapPin size={18} color="#06b6d4" /> Coimbatore MapLibre
+          </NavLink>
+          <NavLink to="/predictive-analysis" onClick={closeSidebar} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+            <Cpu size={18} color="#10b981" /> Predictive ML & LSTM
           </NavLink>
           <NavLink to="/chat" onClick={closeSidebar} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
             <Bot size={18} color="#38bdf8" /> {t('nav.landTraceAI', 'LandTrace AI')}
