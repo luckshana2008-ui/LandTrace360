@@ -55,7 +55,7 @@ export default {
 
     try {
       // 2. Health Check
-      if (pathname === '/health' || pathname === '/') {
+      if (pathname === '/health' || pathname === '/api/health' || pathname === '/') {
         return jsonResponse({
           status: 'HEALTHY',
           service: 'LandTrace360 Cloudflare Worker API',
@@ -346,6 +346,144 @@ export default {
           qr_code_url: `https://landtrace360.in/land/${land.id}`,
           checksum: `SHA256:${btoa(`${land.id}:${land.survey_number}:${land.owner}`)}`,
           disclaimer: "Demo / Synthetic Project Data — Not an Official Government Land Record"
+        });
+      }
+
+      const riskBreakdownMatch = pathname.match(/^\/api\/lands\/([^/]+)\/risk-breakdown$/);
+      if (riskBreakdownMatch && method === 'GET') {
+        const landId = decodeURIComponent(riskBreakdownMatch[1]);
+        const lands = getAllLands();
+        const land = lands.find(l => l.id.toLowerCase() === landId.toLowerCase()) || { id: landId, risk_score: 18, health_score: 82 };
+        const hasCase = (land.active_cases > 0) || land.status?.includes("Dispute");
+        const hasBoundary = land.status?.includes("Boundary");
+        const hasMortgage = !!land.mortgage_active;
+
+        const dimensions = [
+          { name: "Legal Disputes & Litigation", score: hasCase ? 80 : 5, level: hasCase ? "HIGH" : "LOW", weight: "25%", details: hasCase ? "Active case contested in civil court" : "Clear of civil court disputes" },
+          { name: "Unreleased Mortgages / Hypothecation", score: hasMortgage ? 70 : 8, level: hasMortgage ? "HIGH" : "LOW", weight: "20%", details: hasMortgage ? "Active institutional lien registered" : "Nil encumbrance (NOC verified)" },
+          { name: "Document Inconsistencies", score: (land.health_score || 85) < 70 ? 55 : 10, level: (land.health_score || 85) < 70 ? "MEDIUM" : "LOW", weight: "15%", details: "Sale deed and EC verification consistency audit" },
+          { name: "Boundary & Area Discrepancies", score: hasBoundary ? 65 : 12, level: hasBoundary ? "MEDIUM" : "LOW", weight: "15%", details: hasBoundary ? "FMB sketch variance noted on eastern corner" : "Sub-meter GPS boundary match" },
+          { name: "Ownership Instability & Rapid Transitions", score: (land.risk_score || 15) > 50 ? 50 : 10, level: (land.risk_score || 15) > 50 ? "MEDIUM" : "LOW", weight: "10%", details: "Historical title conveyancing frequency" },
+          { name: "Guideline vs Market Value Variance", score: 12, level: "LOW", weight: "5%", details: "TNREGINET guideline circle rate comparison" },
+          { name: "Environmental & Coastal Zoning", score: 5, level: "LOW", weight: "5%", details: "Master Plan land use zone clearance" },
+          { name: "Possession & Ground Survey Match", score: 8, level: "LOW", weight: "5%", details: "Physical boundary stone demarcation verified" }
+        ];
+
+        return jsonResponse({
+          land_id: land.id,
+          overall_score: land.risk_score || 15,
+          overall_level: (land.risk_score || 15) < 30 ? "LOW" : (land.risk_score || 15) < 60 ? "MEDIUM" : "HIGH",
+          dimensions,
+          analyzed_at: new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC',
+          disclaimer: "Multi-factor risk evaluation based on stored cadastral and registry records."
+        });
+      }
+
+      const storyMatch = pathname.match(/^\/api\/lands\/([^/]+)\/story$/);
+      if (storyMatch && method === 'GET') {
+        const landId = decodeURIComponent(storyMatch[1]);
+        const lands = getAllLands();
+        const land = lands.find(l => l.id.toLowerCase() === landId.toLowerCase()) || { id: landId, owner: "Registered Landholder", location: "Coimbatore", survey_number: "104/A", risk_score: 15, health_score: 85 };
+
+        return jsonResponse({
+          land_id: land.id,
+          survey_number: land.survey_number,
+          overall_verdict: (land.risk_score || 15) < 30 ? "SAFE_TO_PURCHASE" : (land.risk_score || 15) < 60 ? "MODERATE_DUE_DILIGENCE_REQUIRED" : "HIGH_RISK_SUSPECT",
+          summary: `Comprehensive chronological narrative for Survey No. ${land.survey_number} in ${land.location}, Coimbatore. Property exhibits strong historical continuity with ${land.status || 'Verified'} tenure.`,
+          stages: [
+            { stage_number: 1, title: "Historical Ownership & Origin", period: "1988 - 2012", tone: "POSITIVE", description: `Originally agricultural Punja land held by ancestral farming families in Coimbatore. Cadastral FMB demarcated.` },
+            { stage_number: 2, title: "Zoning & Land Use Transition", period: "2012 - 2020", tone: "NEUTRAL", description: `Re-designated under Coimbatore Local Planning Authority (LPA) master plan with guideline valuations indexed.` },
+            { stage_number: 3, title: "Current Custody & Integrity Assessment", period: "2020 - Present", tone: (land.risk_score || 15) < 30 ? "POSITIVE" : "ATTENTION_REQUIRED", description: `Title currently registered under ${land.owner}. Land Health Index stands at ${land.health_score || 85}%.` }
+          ]
+        });
+      }
+
+      const historyMatch = pathname.match(/^\/api\/lands\/([^/]+)\/history$/);
+      if (historyMatch && method === 'GET') {
+        const landId = decodeURIComponent(historyMatch[1]).toUpperCase();
+        if (legacyRecords.history && legacyRecords.history[landId]) {
+          return jsonResponse(legacyRecords.history[landId]);
+        }
+        const land = getAllLands().find(l => l.id.toUpperCase() === landId);
+        return jsonResponse([
+          { year: 2012, owner: "Ancestral Family Settlement", status: "Agricultural Punja", transactions: 0, risk_score: 10, boundary_status: "FMB Surveyed" },
+          { year: 2018, owner: land?.owner || "Prior Registered Entity", status: "Converted Commercial/Mixed", transactions: 1, risk_score: land?.risk_score ? Math.round(land.risk_score * 0.8) : 15, boundary_status: "Stone Bound" },
+          { year: 2026, owner: land?.owner || "Current Owner", status: land?.status || "Verified", transactions: 2, risk_score: land?.risk_score || 12, boundary_status: "Digital GPS Demarcated" }
+        ]);
+      }
+
+      const ownersMatch = pathname.match(/^\/api\/lands\/([^/]+)\/owners$/);
+      if (ownersMatch && method === 'GET') {
+        const landId = decodeURIComponent(ownersMatch[1]).toUpperCase();
+        if (legacyRecords.owners && legacyRecords.owners[landId]) {
+          return jsonResponse(legacyRecords.owners[landId]);
+        }
+        const land = getAllLands().find(l => l.id.toUpperCase() === landId);
+        return jsonResponse([
+          { name: land?.owner || "Current Registered Owner", period: "2018 - Present", type: "Registered Title Holder" },
+          { name: "Prior Landholder / Pattadar", period: "1995 - 2018", type: "Settlement Deed" }
+        ]);
+      }
+
+      const documentsMatch = pathname.match(/^\/api\/lands\/([^/]+)\/documents$/);
+      if (documentsMatch && method === 'GET') {
+        const landId = decodeURIComponent(documentsMatch[1]).toUpperCase();
+        if (legacyRecords.documents && legacyRecords.documents[landId]) {
+          return jsonResponse(legacyRecords.documents[landId]);
+        }
+        const land = getAllLands().find(l => l.id.toUpperCase() === landId);
+        return jsonResponse([
+          { doc_no: `DOC-TN-${landId}-01`, type: "Sale Deed & Title Registration", date: "2018-06-14", verification: "Verified", result: "Match" },
+          { doc_no: `EC-${land?.patta_number || '88102'}`, type: "Encumbrance Certificate (1985-2026)", date: "2026-08-20", verification: "Verified", result: "Match" },
+          { doc_no: `FMB-${land?.survey_number || '412'}`, type: "Field Measurement Book (FMB Sketch)", date: "2024-03-10", verification: "Verified", result: "Match" }
+        ]);
+      }
+
+      const casesMatch = pathname.match(/^\/api\/lands\/([^/]+)\/cases$/);
+      if (casesMatch && method === 'GET') {
+        const landId = decodeURIComponent(casesMatch[1]).toUpperCase();
+        if (legacyRecords.cases && legacyRecords.cases[landId]) {
+          return jsonResponse(legacyRecords.cases[landId]);
+        }
+        const land = getAllLands().find(l => l.id.toUpperCase() === landId);
+        if (land && land.active_cases > 0) {
+          return jsonResponse([
+            { case_no: `OS-104/2024`, court: "Coimbatore District Commercial Court", status: "Active Hearing", type: "Partition & Recovery Dispute", filing_date: "2024-04-12" }
+          ]);
+        }
+        return jsonResponse([]);
+      }
+
+      const mortgagesMatch = pathname.match(/^\/api\/lands\/([^/]+)\/mortgages$/);
+      if (mortgagesMatch && method === 'GET') {
+        const landId = decodeURIComponent(mortgagesMatch[1]).toUpperCase();
+        if (legacyRecords.mortgages && legacyRecords.mortgages[landId]) {
+          return jsonResponse(legacyRecords.mortgages[landId]);
+        }
+        const land = getAllLands().find(l => l.id.toUpperCase() === landId);
+        if (land && land.mortgage_active) {
+          return jsonResponse([
+            { bank: "State Bank of India (Coimbatore Main)", amount: "₹18,500,000", status: "Active Hypothecation", registered_date: "2022-03-15" }
+          ]);
+        }
+        return jsonResponse([]);
+      }
+
+      const dnaMatch = pathname.match(/^\/api\/lands\/([^/]+)\/dna$/);
+      if (dnaMatch && method === 'GET') {
+        const landId = decodeURIComponent(dnaMatch[1]).toUpperCase();
+        if (legacyRecords.dna && legacyRecords.dna[landId]) {
+          return jsonResponse(legacyRecords.dna[landId]);
+        }
+        const land = getAllLands().find(l => l.id.toUpperCase() === landId);
+        return jsonResponse({
+          land_id: landId,
+          ownership_stability: (land?.risk_score || 15) < 25 ? 90 : 50,
+          document_health: land?.health_score || 85,
+          legal_safety: (land?.active_cases || 0) > 0 ? 30 : 95,
+          mortgage_status: land?.mortgage_active ? 40 : 95,
+          boundary_stability: land?.status?.includes("Boundary") ? 45 : 90,
+          overall_health: land?.health_score || 85
         });
       }
 

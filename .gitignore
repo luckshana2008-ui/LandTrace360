@@ -34,6 +34,8 @@ build/
 .env.local
 .env.*.local
 .gemini/
+.vscode/
+test_cf_worker.js
 *.log
 .DS_Store
 Thumbs.db
