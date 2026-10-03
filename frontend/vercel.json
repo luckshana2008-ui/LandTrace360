@@ -2,7 +2,7 @@
     "rewrites": [
         {
             "source": "/api/(.*)",
-            "destination": "https://landtrace360-api.same-trail.workers.dev/api/$1"
+            "destination": "/api/[...path]"
         },
         {
             "source": "/(.*)",

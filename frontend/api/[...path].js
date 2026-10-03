@@ -39,11 +39,14 @@ function getAllLands() {
   return [...demoLands, ...coimbatoreLands];
 }
 
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    const pathname = url.pathname.replace(/\/+$/, '') || '/';
-    const method = request.method.toUpperCase();
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function handler(request) {
+  const url = new URL(request.url);
+  const pathname = url.pathname.replace(/\/+$/, '') || '/';
+  const method = request.method.toUpperCase();
 
     // 1. Handle CORS Preflight
     if (method === 'OPTIONS') {
@@ -618,5 +621,4 @@ export default {
     } catch (err) {
       return jsonResponse({ error: 'Worker internal exception', details: err.message }, 500);
     }
-  }
-};
+}

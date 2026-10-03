@@ -7,6 +7,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../i18n/LanguageContext';
 import LanguageSelector from '../components/LanguageSelector';
+import GoogleSignInButton from '../components/GoogleSignInButton';
 
 const DEMO_PASSWORD = "DemoPassword123!";
 
@@ -210,6 +211,16 @@ const Login = () => {
             <span>{formError || authError}</span>
           </div>
         )}
+
+        {/* Google Authentication Sign In */}
+        <div style={{ marginBottom: '1.25rem' }}>
+          <GoogleSignInButton text="Continue with Google" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: '1.25rem 0 0.25rem 0', color: 'var(--text-secondary)', fontSize: '0.76rem' }}>
+            <div style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.1)' }} />
+            <span>OR SIGN IN WITH EMAIL</span>
+            <div style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.1)' }} />
+          </div>
+        </div>
 
         {/* Form */}
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>

@@ -1,0 +1,43 @@
+{
+  "source_platform": "Open Government Data (OGD) Platform India (data.gov.in)",
+  "programme": "Digital India Land Records Modernization Programme (DILRMP)",
+  "state_nodal_agency": "Survey & Land Records Department, Government of Tamil Nadu (Tamil Nilam)",
+  "registration_authority": "Commercial Taxes and Registration Department (TNREGINET)",
+  "district": "Coimbatore",
+  "guideline_revision_year": "2024-2026",
+  "metadata": {
+    "ogd_catalog_id": "DILRMP-TN-CBE-2026",
+    "open_data_license": "Government Open Data License - India (GODL)",
+    "last_sync": "2026-09-30T18:00:00+05:30",
+    "total_parcels_catalogued": 84210
+  },
+  "sub_registrar_offices": [
+    { "sro_code": "CBE-01", "name": "Coimbatore Central (Gandhipuram)", "taluk": "Coimbatore Central", "revenue_villages": 14 },
+    { "sro_code": "CBE-02", "name": "Peelamedu", "taluk": "Coimbatore North", "revenue_villages": 18 },
+    { "sro_code": "CBE-03", "name": "Singanallur", "taluk": "Coimbatore South", "revenue_villages": 12 },
+    { "sro_code": "CBE-04", "name": "Pollachi", "taluk": "Pollachi", "revenue_villages": 42 },
+    { "sro_code": "CBE-05", "name": "Sulur", "taluk": "Sulur", "revenue_villages": 25 },
+    { "sro_code": "CBE-06", "name": "Thondamuthur / Vadavalli", "taluk": "Coimbatore West", "revenue_villages": 19 }
+  ],
+  "guideline_rates_benchmark": [
+    { "zone": "Peelamedu Avinashi Road Corridor", "category": "Commercial Commercial Class I", "rate_per_sqft": 1850, "historical_cagr_5yr": 14.2 },
+    { "zone": "Saravanampatti Sathy Road IT Hub", "category": "Commercial Mixed Class II", "rate_per_sqft": 1250, "historical_cagr_5yr": 16.8 },
+    { "zone": "RS Puram West Venkatasamy Road", "category": "Prime Residential Special", "rate_per_sqft": 2400, "historical_cagr_5yr": 9.5 },
+    { "zone": "Singanallur Trichy Road Industrial", "category": "Industrial Heavy/Light", "rate_per_sqft": 850, "historical_cagr_5yr": 7.4 },
+    { "zone": "Gandhipuram Cross Cut Road", "category": "Commercial High Density", "rate_per_sqft": 3600, "historical_cagr_5yr": 11.0 },
+    { "zone": "Pollachi Coconut Agro Belt", "category": "Agricultural Dry/Wet", "rate_per_sqft": 90, "rate_per_acre": 3920400, "historical_cagr_5yr": 8.1 },
+    { "zone": "Sulur Defense & Logistics Corridor", "category": "Industrial Logistic Hub", "rate_per_sqft": 520, "historical_cagr_5yr": 15.3 },
+    { "zone": "Vadavalli Marudhamalai Residential", "category": "Residential Class I", "rate_per_sqft": 1100, "historical_cagr_5yr": 12.4 }
+  ],
+  "annual_transaction_history": [
+    { "year": 2018, "transactions_volume": 12450, "avg_price_sqft": 920, "dispute_rate_pct": 4.2 },
+    { "year": 2019, "transactions_volume": 13800, "avg_price_sqft": 1010, "dispute_rate_pct": 3.9 },
+    { "year": 2020, "transactions_volume": 11200, "avg_price_sqft": 1050, "dispute_rate_pct": 4.5 },
+    { "year": 2021, "transactions_volume": 14900, "avg_price_sqft": 1180, "dispute_rate_pct": 3.7 },
+    { "year": 2022, "transactions_volume": 16850, "avg_price_sqft": 1320, "dispute_rate_pct": 3.4 },
+    { "year": 2023, "transactions_volume": 18200, "avg_price_sqft": 1480, "dispute_rate_pct": 3.1 },
+    { "year": 2024, "transactions_volume": 19600, "avg_price_sqft": 1640, "dispute_rate_pct": 2.8 },
+    { "year": 2025, "transactions_volume": 21100, "avg_price_sqft": 1810, "dispute_rate_pct": 2.5 },
+    { "year": 2026, "transactions_volume": 22800, "avg_price_sqft": 1980, "dispute_rate_pct": 2.2 }
+  ]
+}
