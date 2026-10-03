@@ -47,7 +47,7 @@ const DEMO_CREDENTIALS = [
 
 const Login = () => {
   const { t } = useLanguage();
-  const { login, isAuthenticated, error: authError, clearError } = useAuth();
+  const { login, isAuthenticated, error: authError, clearError, enterAsPublicGuest } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -370,6 +370,42 @@ const Login = () => {
             )}
           </button>
         </form>
+
+        {/* Public Open Access 1-Click Gateway */}
+        <div style={{ marginTop: '1rem', textAlign: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: '0.75rem 0', color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
+            <div style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.1)' }} />
+            <span>OR OPEN ACCESS</span>
+            <div style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.1)' }} />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (enterAsPublicGuest) enterAsPublicGuest();
+              navigate('/');
+            }}
+            style={{
+              width: '100%',
+              padding: '0.75rem 1.25rem',
+              borderRadius: '10px',
+              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(56, 189, 248, 0.15))',
+              border: '1px solid rgba(52, 211, 153, 0.4)',
+              color: '#34d399',
+              fontWeight: 700,
+              fontSize: '0.9rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              boxShadow: '0 4px 15px rgba(16, 185, 129, 0.15)',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <Sparkles size={16} />
+            ⚡ Enter Directly as Public Guest (Open Access)
+          </button>
+        </div>
 
         {/* Create Account Link */}
         <div style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>

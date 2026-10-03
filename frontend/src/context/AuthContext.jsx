@@ -6,10 +6,19 @@ const AuthContext = createContext(null);
 const TOKEN_KEY = 'landtrace_auth_token';
 const USER_KEY = 'landtrace_auth_user';
 
+export const PUBLIC_GUEST_USER = {
+  id: 'usr-guest-001',
+  email: 'public@landtrace.in',
+  name: 'Public Explorer',
+  full_name: 'Public Explorer / Guest',
+  role: 'investigator'
+};
+export const PUBLIC_GUEST_TOKEN = 'cf_jwt_public_open_access_token';
+
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(PUBLIC_GUEST_USER);
+  const [token, setToken] = useState(PUBLIC_GUEST_TOKEN);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   // Restore session on mount
@@ -20,6 +29,9 @@ export const AuthProvider = ({ children }) => {
         const storedUser = localStorage.getItem(USER_KEY) || sessionStorage.getItem(USER_KEY);
 
         if (!storedToken) {
+          // Open Access to All: Default to Public Explorer
+          setUser(PUBLIC_GUEST_USER);
+          setToken(PUBLIC_GUEST_TOKEN);
           setLoading(false);
           return;
         }
@@ -31,7 +43,7 @@ export const AuthProvider = ({ children }) => {
           try {
             setUser(JSON.parse(storedUser));
           } catch (e) {
-            // Ignore parse error
+            setUser(PUBLIC_GUEST_USER);
           }
         }
 
@@ -73,8 +85,16 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem(USER_KEY);
     sessionStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(USER_KEY);
-    setUser(null);
-    setToken(null);
+    setUser(PUBLIC_GUEST_USER);
+    setToken(PUBLIC_GUEST_TOKEN);
+  };
+
+  const enterAsPublicGuest = () => {
+    setUser(PUBLIC_GUEST_USER);
+    setToken(PUBLIC_GUEST_TOKEN);
+    localStorage.setItem(TOKEN_KEY, PUBLIC_GUEST_TOKEN);
+    localStorage.setItem(USER_KEY, JSON.stringify(PUBLIC_GUEST_USER));
+    return { success: true, user: PUBLIC_GUEST_USER };
   };
 
   const login = async (email, password, rememberMe = false) => {
@@ -198,6 +218,7 @@ export const AuthProvider = ({ children }) => {
     login,
     register,
     logout,
+    enterAsPublicGuest,
     clearError
   };
 

@@ -49,11 +49,7 @@ const ProtectedRoute = ({ children }) => {
     );
   }
 
-  if (!isAuthenticated) {
-    // Redirect unauthenticated user to Login, remembering the attempted location
-    return <Navigate to="/login" replace state={{ from: location }} />;
-  }
-
+  // Open Access: Allow all public users to explore the full platform seamlessly
   return children ? children : <Outlet />;
 };
 
