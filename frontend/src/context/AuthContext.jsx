@@ -320,16 +320,18 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      if (token) {
+      if (token && token !== PUBLIC_GUEST_TOKEN) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
         await fetch(`${API_BASE}/api/auth/logout`, {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+          headers: { 'Authorization': `Bearer ${token}` },
+          signal: controller.signal
         });
+        clearTimeout(timeout);
       }
     } catch (e) {
-      // Ignore network errors on logout
+      // Ignore network errors / timeout on logout — always clear session
     } finally {
       clearSession();
     }

@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   Target, Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck,
-  AlertCircle, Sparkles, UserCheck, HelpCircle, X
+  AlertCircle, Sparkles, UserCheck, HelpCircle, X, LogOut, User, LayoutDashboard
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -48,7 +48,7 @@ const DEMO_CREDENTIALS = [
 
 const Login = () => {
   const { t } = useLanguage();
-  const { login, isAuthenticated, error: authError, clearError, enterAsPublicGuest } = useAuth();
+  const { login, logout, user, isAuthenticated, error: authError, clearError, enterAsPublicGuest } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -60,14 +60,149 @@ const Login = () => {
   const [formError, setFormError] = useState('');
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [activeDemoRole, setActiveDemoRole] = useState(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
-  // If already logged in, redirect to dashboard or attempted URL
-  useEffect(() => {
-    if (isAuthenticated) {
-      const destination = location.state?.from?.pathname || '/';
-      navigate(destination, { replace: true });
-    }
-  }, [isAuthenticated, navigate, location]);
+  // If already logged in, show "Already Signed In" screen instead of silently redirecting
+  const isGuest = user?.id === 'usr-guest-001' || user?.email === 'public@landtrace.in';
+  const isRealUser = isAuthenticated && !isGuest;
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    await logout();
+    setLoggingOut(false);
+  };
+
+  if (isRealUser) {
+    const destination = location.state?.from?.pathname || '/';
+    const displayName = user?.name || user?.full_name || user?.email || 'User';
+    const avatarLetter = displayName.charAt(0).toUpperCase();
+    const roleLabel = user?.role === 'investigator' ? '🛡️ Revenue Officer / Admin'
+      : user?.role === 'owner' ? '🏠 Land Owner / Seller'
+      : user?.auth_provider === 'google' ? '🔵 Google Account'
+      : '💼 Land Investor';
+
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '2rem 1rem',
+          background: 'radial-gradient(ellipse at top, #0f172a 0%, #030712 100%)',
+          position: 'relative',
+          overflow: 'hidden'
+        }}
+      >
+        {/* Background glow orbs */}
+        <div style={{ position: 'absolute', width: '500px', height: '500px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(16,185,129,0.12) 0%, transparent 70%)', top: '-150px', left: '-100px', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', width: '500px', height: '500px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(56,189,248,0.10) 0%, transparent 70%)', bottom: '-150px', right: '-100px', pointerEvents: 'none' }} />
+
+        <div
+          className="glass-panel"
+          style={{
+            width: '100%',
+            maxWidth: '460px',
+            padding: '2.5rem 2rem',
+            borderRadius: '20px',
+            background: 'rgba(15, 23, 42, 0.90)',
+            border: '1px solid rgba(52, 211, 153, 0.3)',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.5), 0 0 40px rgba(16,185,129,0.12)',
+            textAlign: 'center',
+            position: 'relative',
+            zIndex: 5
+          }}
+        >
+          {/* Verified badge */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(52,211,153,0.4)', borderRadius: '20px', padding: '0.3rem 0.9rem', fontSize: '0.75rem', fontWeight: 700, color: '#34d399', marginBottom: '1.5rem', letterSpacing: '0.05em' }}>
+            <ShieldCheck size={13} />
+            ALREADY SIGNED IN
+          </div>
+
+          {/* Avatar */}
+          <div style={{ width: '72px', height: '72px', borderRadius: '50%', background: 'linear-gradient(135deg, #10b981, #38bdf8)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem', fontWeight: 800, color: '#fff', marginBottom: '1.25rem', boxShadow: '0 0 30px rgba(16,185,129,0.35)' }}>
+            {user?.picture ? <img src={user.picture} alt={displayName} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : avatarLetter}
+          </div>
+
+          {/* User info */}
+          <h2 style={{ margin: '0 0 0.3rem 0', fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+            Welcome back, {displayName.split(' ')[0]}!
+          </h2>
+          <p style={{ margin: '0 0 0.35rem 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+            {user?.email}
+          </p>
+          <p style={{ margin: '0 0 2rem 0', fontSize: '0.8rem', color: '#34d399', fontWeight: 600 }}>
+            {roleLabel}
+          </p>
+
+          {/* Go to Dashboard */}
+          <button
+            id="btn-go-to-dashboard"
+            onClick={() => navigate(destination, { replace: true })}
+            style={{
+              width: '100%',
+              padding: '0.9rem 1.5rem',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #10b981, #38bdf8)',
+              color: '#fff',
+              border: 'none',
+              fontWeight: 700,
+              fontSize: '0.95rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              boxShadow: '0 6px 20px rgba(16,185,129,0.35)',
+              marginBottom: '0.75rem',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <LayoutDashboard size={18} />
+            Go to Dashboard
+          </button>
+
+          {/* Logout */}
+          <button
+            id="btn-logout-from-already-signed-in"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            style={{
+              width: '100%',
+              padding: '0.8rem 1.5rem',
+              borderRadius: '12px',
+              background: 'rgba(239,68,68,0.1)',
+              border: '1px solid rgba(239,68,68,0.35)',
+              color: '#f87171',
+              fontWeight: 700,
+              fontSize: '0.9rem',
+              cursor: loggingOut ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              transition: 'all 0.2s ease',
+              opacity: loggingOut ? 0.7 : 1
+            }}
+          >
+            <LogOut size={17} />
+            {loggingOut ? 'Signing out...' : 'Sign Out / Switch Account'}
+          </button>
+
+          <p style={{ marginTop: '1.5rem', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+            Not you?{' '}
+            <button
+              onClick={handleLogout}
+              style={{ background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600, padding: 0 }}
+            >
+              Log out and use a different account
+            </button>
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
