@@ -1,10 +1,13 @@
 import React from 'react';
 import { Navigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Target, Shield } from 'lucide-react';
+import { Target } from 'lucide-react';
+import { PUBLIC_GUEST_TOKEN } from '../context/AuthContext';
+
+const TOKEN_KEY = 'landtrace_auth_token';
 
 const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, token } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -49,7 +52,17 @@ const ProtectedRoute = ({ children }) => {
     );
   }
 
-  // Open Access: Allow all public users to explore the full platform seamlessly
+  // Check if user has a stored session in localStorage or sessionStorage
+  const hasStoredSession =
+    localStorage.getItem(TOKEN_KEY) !== null ||
+    sessionStorage.getItem(TOKEN_KEY) !== null;
+
+  // Fresh visitor with no session at all → redirect to login
+  if (!hasStoredSession) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // Has a stored session (guest or real) → allow through
   return children ? children : <Outlet />;
 };
 
