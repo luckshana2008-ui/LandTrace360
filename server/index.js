@@ -68,7 +68,7 @@ app.use('/api/search', fastApiProxy);
 app.use('/uploads', fastApiProxy);
 
 // Health check & status
-app.get('/health', (req, res) => {
+app.get(['/health', '/api/health'], (req, res) => {
   res.json({
     status: 'HEALTHY',
     service: 'LandTrace360 Remerged Coupled Server',
