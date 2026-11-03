@@ -192,7 +192,7 @@ async def lifespan(app: FastAPI):
     # shutdown
 
 
-app = FastAPI(title="LandTrace360 Complete API", lifespan=lifespan)
+app = FastAPI(title="LandTrace360 Complete API", version="1.6.0", lifespan=lifespan)
 
 # CORS — always allow the deployed Vercel frontend + localhost / 127.0.0.1 for dev.
 # FRONTEND_URL env var is also respected if set (e.g. for staging/preview URLs).
@@ -201,6 +201,8 @@ _frontend_url = os.environ.get("FRONTEND_URL", "").strip()
 _allowed_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:8000",

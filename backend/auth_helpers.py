@@ -341,16 +341,17 @@ def authenticate_user(
     raw_identifier = email.strip().lower()
     clean_password = password.strip()
     
-    # 0. Alias normalization
+    # 0. Alias normalization (only if not an exact known account)
     email_clean = raw_identifier
-    if raw_identifier in ['admin', 'administrator', 'inspector', 'investigator', 'officer', 'revenue'] or raw_identifier.startswith('admin@') or raw_identifier.startswith('investigator@'):
-        email_clean = 'admin@landtrace.in'
-    elif raw_identifier in ['user', 'buyer', 'investor', 'client'] or raw_identifier.startswith('user@') or raw_identifier.startswith('buyer@'):
-        email_clean = 'user@landtrace.in'
-    elif raw_identifier in ['owner', 'seller', 'landholder'] or raw_identifier.startswith('owner@') or raw_identifier.startswith('seller@'):
-        email_clean = 'owner@landtrace.in'
-    elif raw_identifier in ['demo', 'test', 'quick', 'tester'] or raw_identifier.startswith('demo@') or raw_identifier.startswith('test@'):
-        email_clean = 'demo@landtrace.in'
+    if email_clean not in IN_MEMORY_USERS:
+        if raw_identifier in ['admin', 'administrator', 'inspector', 'investigator', 'officer', 'revenue'] or raw_identifier.startswith('admin@') or raw_identifier.startswith('investigator@'):
+            email_clean = 'admin@landtrace.in'
+        elif raw_identifier in ['user', 'buyer', 'investor', 'client'] or raw_identifier.startswith('user@') or raw_identifier.startswith('buyer@'):
+            email_clean = 'user@landtrace.in'
+        elif raw_identifier in ['owner', 'seller', 'landholder'] or raw_identifier.startswith('owner@') or raw_identifier.startswith('seller@'):
+            email_clean = 'owner@landtrace.in'
+        elif raw_identifier in ['demo', 'test', 'quick', 'tester'] or raw_identifier.startswith('demo@') or raw_identifier.startswith('test@'):
+            email_clean = 'demo@landtrace.in'
         
     user_data = None
     
@@ -376,24 +377,8 @@ def authenticate_user(
     if not user_data and email_clean in IN_MEMORY_USERS:
         user_data = IN_MEMORY_USERS[email_clean]
         
-    # 3. Auto-provision if not found so testing is never blocked
     if not user_data:
-        parts = email_clean.split('@')
-        base_name = parts[0] or 'User'
-        cap_name = base_name.capitalize()
-        role = 'investigator' if 'admin' in email_clean else 'owner' if 'owner' in email_clean else 'buyer'
-        h_pwd, s_pwd = hash_password(clean_password)
-        user_data = {
-            "id": f"USR-{secrets.token_hex(4).upper()}",
-            "email": email_clean if '@' in email_clean else f"{email_clean}@landtrace.in",
-            "full_name": f"{cap_name} (Auto-Provisioned)",
-            "role": role,
-            "hashed_password": h_pwd,
-            "salt": s_pwd,
-            "is_active": True,
-            "created_at": datetime.utcnow()
-        }
-        IN_MEMORY_USERS[user_data["email"].lower()] = user_data
+        return None, "Invalid email or password."
     
     if not user_data.get("is_active", True):
         return None, "This account is inactive. Please contact support."
