@@ -1,12 +1,14 @@
 services:
   - type: web
-    name: landtrace360-backend
+    name: LandTrace360
     env: python
     region: oregon
     plan: free
-    buildCommand: pip install -r backend/requirements.txt
+    buildCommand: pip install -r requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: DATABASE_URL
         sync: false   # Optional: PostgreSQL connection string or leave unset for automatic demo data
       - key: FRONTEND_URL
