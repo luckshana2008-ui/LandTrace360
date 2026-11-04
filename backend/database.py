@@ -15,21 +15,37 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+raw_url = os.getenv("DATABASE_URL", "").strip()
 
-if not DATABASE_URL:
-    # When DATABASE_URL is not set, use local SQLite so startup succeeds immediately without
-    # hanging on an unavailable local PostgreSQL port. Tables and demo data are initialized automatically.
-    # To use a dedicated PostgreSQL database on Render, set DATABASE_URL in Render Environment Variables.
-    DATABASE_URL = "sqlite:///./landtrace360.db"
+def _is_valid_remote_database(url: str) -> bool:
+    if not url:
+        return False
+    lower = url.lower()
+    if lower in ("none", "null", "false", "undefined", "", "sqlite", "sqlite://"):
+        return False
+    # If the URL points to localhost or 127.0.0.1, it cannot reach a cloud database on Render
+    if "localhost" in lower or "127.0.0.1" in lower:
+        return False
+    return True
+
+if _is_valid_remote_database(raw_url):
+    DATABASE_URL = raw_url
+    # Render postgres:// handling
+    # Explicitly use postgresql+psycopg2:// if psycopg2 is installed to avoid missing driver errors
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif DATABASE_URL.startswith("postgresql://") and "+psycopg" not in DATABASE_URL:
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
+    logger.info("DATABASE_URL is set to a remote PostgreSQL database.")
+else:
+    # Use SQLite for safe, self-contained startup without requiring a local Postgres service.
+    # Absolute path ensures database file is accessible regardless of working directory.
+    _db_path = Path(_BACKEND_DIR) / "landtrace360.db"
+    DATABASE_URL = f"sqlite:///{_db_path.resolve().as_posix()}"
     logger.info(
-        "DATABASE_URL not set in environment. Initializing local database: sqlite:///./landtrace360.db. "
-        "For persistent storage across Render rebuilds, configure DATABASE_URL in Render Environment Variables."
+        f"DATABASE_URL not set or points to localhost. Using local SQLite database at {DATABASE_URL}. "
+        "For persistent storage across Render rebuilds, configure a remote PostgreSQL DATABASE_URL in Render Environment Variables."
     )
-
-# Render uses postgres:// but SQLAlchemy needs postgresql://
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 # Set connect_timeout so startup does not hang if postgres is unreachable
 connect_args = {}
