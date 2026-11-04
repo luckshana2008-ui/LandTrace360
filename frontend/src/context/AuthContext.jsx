@@ -101,15 +101,28 @@ export const AuthProvider = ({ children }) => {
     return { id: `usr-${role}-edge`, email: clean || 'user@landtrace.in', name, full_name: name, role };
   };
 
+  const OFFLINE_DEMO_ACCOUNTS = {
+    'admin@landtrace.in':             { password: 'Admin@2026',       role: 'investigator', name: 'Revenue Officer / Admin' },
+    'user@landtrace.in':              { password: 'User@2026',        role: 'buyer',        name: 'Kovai Land Investor' },
+    'owner@landtrace.in':             { password: 'Owner@2026',       role: 'owner',        name: 'Peelamedu Landholder' },
+    'demo@landtrace.in':              { password: '123456',           role: 'buyer',        name: 'Quick Demo User' },
+    'owner@landtrace360.demo':        { password: 'DemoPassword123!', role: 'owner',        name: 'Demo Land Owner' },
+    'buyer@landtrace360.demo':        { password: 'DemoPassword123!', role: 'buyer',        name: 'Demo Buyer' },
+    'investigator@landtrace360.demo': { password: 'DemoPassword123!', role: 'investigator', name: 'Demo Investigator' },
+  };
+
   const login = async (email, password, rememberMe = false) => {
     setError(null);
     const cleanEmail = (email || '').trim().toLowerCase();
     const payload    = JSON.stringify({ email: cleanEmail, password, remember_me: rememberMe });
 
-    for (const url of [`${API_BASE}/api/auth/login`, '/api/auth/login']) {
+    const endpoints = [`${API_BASE}/api/auth/login`];
+    if (API_BASE) endpoints.push('/api/auth/login');
+
+    for (const url of endpoints) {
       try {
         const ctrl = new AbortController();
-        const t    = setTimeout(() => ctrl.abort(), 3000);
+        const t    = setTimeout(() => ctrl.abort(), 4000);
         const res  = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -129,19 +142,37 @@ export const AuthProvider = ({ children }) => {
             store.setItem(USER_KEY, JSON.stringify(receivedUser));
             return { success: true, user: receivedUser };
           }
+        } else if (res.status === 401 || res.status === 400) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.detail || 'Invalid email or password.';
+          setError(errMsg);
+          return { success: false, error: errMsg };
         }
       } catch (_) {}
     }
 
-    // Offline fallback — always succeeds
-    const fallbackUser  = resolveFallbackUser(cleanEmail);
-    const fallbackToken = `cf_jwt_${btoa(`${cleanEmail}:${fallbackUser.role}:${Date.now()}`)}`;
-    setToken(fallbackToken);
-    setUser(fallbackUser);
-    const store = rememberMe ? localStorage : sessionStorage;
-    store.setItem(TOKEN_KEY, fallbackToken);
-    store.setItem(USER_KEY, JSON.stringify(fallbackUser));
-    return { success: true, user: fallbackUser };
+    // Network offline fallback: validate against demo credentials strictly
+    const demoAcc = OFFLINE_DEMO_ACCOUNTS[cleanEmail];
+    if (demoAcc) {
+      if (demoAcc.password === password) {
+        const fallbackUser  = { id: `usr-${demoAcc.role}-offline`, email: cleanEmail, name: demoAcc.name, full_name: demoAcc.name, role: demoAcc.role };
+        const fallbackToken = `cf_jwt_${btoa(`${cleanEmail}:${demoAcc.role}:${Date.now()}`)}`;
+        setToken(fallbackToken);
+        setUser(fallbackUser);
+        const store = rememberMe ? localStorage : sessionStorage;
+        store.setItem(TOKEN_KEY, fallbackToken);
+        store.setItem(USER_KEY, JSON.stringify(fallbackUser));
+        return { success: true, user: fallbackUser };
+      } else {
+        const errMsg = 'Invalid email or password.';
+        setError(errMsg);
+        return { success: false, error: errMsg };
+      }
+    }
+
+    const errMsg = 'Authentication server unreachable. Please check your network connection.';
+    setError(errMsg);
+    return { success: false, error: errMsg };
   };
 
   const register = async (fullName, email, password, role = 'buyer') => {
@@ -149,10 +180,13 @@ export const AuthProvider = ({ children }) => {
     const cleanEmail = (email || '').trim().toLowerCase();
     const payload    = JSON.stringify({ full_name: fullName.trim(), email: cleanEmail, password, role });
 
-    for (const url of [`${API_BASE}/api/auth/register`, '/api/auth/register']) {
+    const endpoints = [`${API_BASE}/api/auth/register`];
+    if (API_BASE) endpoints.push('/api/auth/register');
+
+    for (const url of endpoints) {
       try {
         const ctrl = new AbortController();
-        const t    = setTimeout(() => ctrl.abort(), 3000);
+        const t    = setTimeout(() => ctrl.abort(), 4000);
         const res  = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -170,8 +204,19 @@ export const AuthProvider = ({ children }) => {
             localStorage.setItem(USER_KEY, JSON.stringify(receivedUser));
             return { success: true, user: receivedUser };
           }
+        } else if (res.status === 400 || res.status === 409) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.detail || 'Email already registered.';
+          setError(errMsg);
+          return { success: false, error: errMsg };
         }
       } catch (_) {}
+    }
+
+    if (OFFLINE_DEMO_ACCOUNTS[cleanEmail]) {
+      const errMsg = 'Email already registered.';
+      setError(errMsg);
+      return { success: false, error: errMsg };
     }
 
     const fallbackUser  = { id: `usr-${role}-${Date.now().toString().slice(-4)}`, email: cleanEmail, name: fullName.trim() || 'Member', full_name: fullName.trim() || 'Member', role };

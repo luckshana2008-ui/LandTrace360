@@ -230,7 +230,7 @@ def root():
     return {
         "status": "ok",
         "service": "LandTrace360 Complete API",
-        "version": "2.6.0"
+        "version": "1.6.0"
     }
 
 @app.get("/health")

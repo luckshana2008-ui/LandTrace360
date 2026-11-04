@@ -20,6 +20,7 @@ let coimbatoreLands = [...coimbatoreLandsData];
 let demoLands = [...demoLandsData];
 let locationAccessHistory = [...locationHistoryData];
 let legacyRecords = { ...legacyRecordsData };
+let registeredUsers = new Map();
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -71,46 +72,94 @@ export default async function handler(request) {
       }
 
       // ── AUTHENTICATION ENDPOINTS ──
-      if (pathname === '/api/auth/login' && method === 'POST') {
+      // Demo credentials lookup table
+      const DEMO_CREDENTIALS = {
+        'admin@landtrace.in':             { password: 'Admin@2026',       role: 'investigator', name: 'Revenue Officer / Admin', id: 'usr-investigator-001' },
+        'user@landtrace.in':              { password: 'User@2026',        role: 'buyer',        name: 'Kovai Land Investor',   id: 'usr-buyer-001' },
+        'owner@landtrace.in':             { password: 'Owner@2026',       role: 'owner',        name: 'Peelamedu Landholder',  id: 'usr-owner-001' },
+        'demo@landtrace.in':              { password: '123456',           role: 'buyer',        name: 'Quick Demo User',       id: 'usr-demo-001' },
+        'owner@landtrace360.demo':        { password: 'DemoPassword123!', role: 'owner',        name: 'Demo Land Owner',       id: 'usr-demo-owner-001' },
+        'buyer@landtrace360.demo':        { password: 'DemoPassword123!', role: 'buyer',        name: 'Demo Buyer',            id: 'usr-demo-buyer-001' },
+        'investigator@landtrace360.demo': { password: 'DemoPassword123!', role: 'investigator', name: 'Demo Investigator',     id: 'usr-demo-inv-001' },
+      };
+
+      if (pathname === '/api/auth/register' && method === 'POST') {
         const body = await request.json().catch(() => ({}));
-        const rawIdentifier = (body.email || body.username || "").trim().toLowerCase();
-        const cleanPassword = (body.password || "").trim();
+        const fullName = (body.full_name || body.name || '').trim();
+        const email = (body.email || '').trim().toLowerCase();
+        const password = (body.password || '').trim();
+        const role = ['owner', 'buyer', 'investigator'].includes(body.role) ? body.role : 'buyer';
 
-        let role = 'buyer';
-        let name = 'Kovai Land Investor';
-        let email = 'user@landtrace.in';
-
-        if (['admin', 'administrator', 'inspector', 'investigator', 'officer'].includes(rawIdentifier) || rawIdentifier.startsWith('admin@')) {
-          role = 'investigator';
-          name = 'Revenue Officer / Admin';
-          email = 'admin@landtrace.in';
-        } else if (['owner', 'seller', 'landholder'].includes(rawIdentifier) || rawIdentifier.startsWith('owner@')) {
-          role = 'owner';
-          name = 'Peelamedu Landholder';
-          email = 'owner@landtrace.in';
-        } else if (['demo', 'test', 'quick'].includes(rawIdentifier) || rawIdentifier.startsWith('demo@')) {
-          role = 'buyer';
-          name = 'Quick Demo User';
-          email = 'demo@landtrace.in';
-        } else if (rawIdentifier.includes('@')) {
-          email = rawIdentifier;
-          name = rawIdentifier.split('@')[0];
+        if (!fullName || !email || !password) {
+          return jsonResponse({ detail: 'Full name, email, and password are required.' }, 400);
         }
 
-        const fakeToken = `cf_jwt_${btoa(`${email}:${role}:${Date.now()}`)}`;
+        if (DEMO_CREDENTIALS[email] || registeredUsers.has(email)) {
+          return jsonResponse({ detail: 'Email already registered.' }, 400);
+        }
+
+        const newUser = {
+          id: `usr-${role}-${Date.now().toString().slice(-6)}`,
+          email,
+          name: fullName,
+          full_name: fullName,
+          role,
+          password
+        };
+        registeredUsers.set(email, newUser);
+
+        const token = `cf_jwt_${btoa(`${email}:${role}:${Date.now()}`)}`;
+        const { password: _, ...userPublic } = newUser;
         return jsonResponse({
-          token: fakeToken,
-          access_token: fakeToken,
+          token,
+          access_token: token,
+          token_type: 'bearer',
+          user: userPublic,
+          message: 'Account created successfully.'
+        });
+      }
+
+      if (pathname === '/api/auth/login' && method === 'POST') {
+        const body = await request.json().catch(() => ({}));
+        const rawIdentifier = (body.email || body.username || '').trim().toLowerCase();
+        const cleanPassword = (body.password || '').trim();
+
+        let userRecord = null;
+        if (DEMO_CREDENTIALS[rawIdentifier]) {
+          if (DEMO_CREDENTIALS[rawIdentifier].password === cleanPassword) {
+            userRecord = {
+              id: DEMO_CREDENTIALS[rawIdentifier].id,
+              email: rawIdentifier,
+              name: DEMO_CREDENTIALS[rawIdentifier].name,
+              full_name: DEMO_CREDENTIALS[rawIdentifier].name,
+              role: DEMO_CREDENTIALS[rawIdentifier].role
+            };
+          }
+        } else if (registeredUsers.has(rawIdentifier)) {
+          const reg = registeredUsers.get(rawIdentifier);
+          if (reg.password === cleanPassword) {
+            userRecord = {
+              id: reg.id,
+              email: reg.email,
+              name: reg.name,
+              full_name: reg.full_name,
+              role: reg.role
+            };
+          }
+        }
+
+        if (!userRecord) {
+          return jsonResponse({ detail: 'Invalid email or password.' }, 401);
+        }
+
+        const token = `cf_jwt_${btoa(`${userRecord.email}:${userRecord.role}:${Date.now()}`)}`;
+        return jsonResponse({
+          token,
+          access_token: token,
           token_type: 'bearer',
           authenticated: true,
-          user: {
-            id: `usr-${role}-001`,
-            email,
-            name,
-            full_name: name,
-            role
-          },
-          message: 'Authenticated successfully on Cloudflare Edge.'
+          user: userRecord,
+          message: 'Authenticated successfully.'
         });
       }
 
@@ -119,7 +168,7 @@ export default async function handler(request) {
         const email = (body.email || 'google.user@gmail.com').trim().toLowerCase();
         const name = body.name || body.full_name || email.split('@')[0];
         const picture = body.picture || body.photoUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`;
-        const role = email.includes('admin') || email.includes('officer') ? 'investigator' : 'buyer';
+        const role = email.includes('admin') || email.includes('officer') ? 'investigator' : (body.role || 'buyer');
 
         const googleToken = `cf_google_jwt_${btoa(`${email}:${role}:${Date.now()}`)}`;
         return jsonResponse({
@@ -137,22 +186,86 @@ export default async function handler(request) {
             role,
             email_verified: true
           },
-          message: 'Authenticated successfully with Google Account on Cloudflare Edge.'
+          message: 'Authenticated successfully with Google Account.'
         });
       }
 
       if (pathname === '/api/auth/me' && method === 'GET') {
         const authHeader = request.headers.get('Authorization') || '';
-        return jsonResponse({
-          authenticated: true,
-          user: {
-            id: 'usr-investigator-001',
-            email: 'admin@landtrace.in',
-            name: 'Revenue Officer / Admin',
-            full_name: 'Revenue Officer / Admin',
-            role: 'investigator'
-          }
-        });
+        const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+        if (!token) {
+          return jsonResponse({ detail: 'Not authenticated' }, 401);
+        }
+
+        if (token === 'cf_jwt_public_open_access_token') {
+          return jsonResponse({
+            authenticated: true,
+            user: {
+              id: 'usr-guest-001',
+              email: 'public@landtrace.in',
+              name: 'Public Explorer',
+              full_name: 'Public Explorer / Guest',
+              role: 'investigator'
+            }
+          });
+        }
+
+        // Try decoding JWT-like cf token
+        let userEmail = '';
+        let userRole = 'buyer';
+        if (token.startsWith('cf_jwt_') || token.startsWith('cf_google_jwt_')) {
+          try {
+            const raw = atob(token.replace(/^cf_(?:google_)?jwt_/, ''));
+            const parts = raw.split(':');
+            userEmail = parts[0] || '';
+            userRole = parts[1] || 'buyer';
+          } catch (_) {}
+        }
+
+        if (userEmail && DEMO_CREDENTIALS[userEmail]) {
+          return jsonResponse({
+            authenticated: true,
+            user: {
+              id: DEMO_CREDENTIALS[userEmail].id,
+              email: userEmail,
+              name: DEMO_CREDENTIALS[userEmail].name,
+              full_name: DEMO_CREDENTIALS[userEmail].name,
+              role: DEMO_CREDENTIALS[userEmail].role
+            }
+          });
+        }
+
+        if (userEmail && registeredUsers.has(userEmail)) {
+          const reg = registeredUsers.get(userEmail);
+          const { password: _, ...pub } = reg;
+          return jsonResponse({
+            authenticated: true,
+            user: pub
+          });
+        }
+
+        // Fallback reconstructed user from token
+        if (userEmail) {
+          const namePart = userEmail.split('@')[0];
+          const displayName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
+          return jsonResponse({
+            authenticated: true,
+            user: {
+              id: `usr-${userRole}-edge`,
+              email: userEmail,
+              name: displayName,
+              full_name: displayName,
+              role: userRole
+            }
+          });
+        }
+
+        return jsonResponse({ detail: 'Invalid or expired session token.' }, 401);
+      }
+
+      if (pathname === '/api/auth/logout' && method === 'POST') {
+        return jsonResponse({ message: 'Logged out successfully.' });
       }
 
       if (pathname === '/api/auth/demo-accounts' && method === 'GET') {
@@ -160,7 +273,10 @@ export default async function handler(request) {
           { roleKey: 'admin', email: 'admin@landtrace.in', password: 'Admin@2026', title: 'Admin / Inspector' },
           { roleKey: 'buyer', email: 'user@landtrace.in', password: 'User@2026', title: 'Buyer' },
           { roleKey: 'owner', email: 'owner@landtrace.in', password: 'Owner@2026', title: 'Land Owner' },
-          { roleKey: 'quick', email: 'demo@landtrace.in', password: '123456', title: 'Quick Test' }
+          { roleKey: 'quick', email: 'demo@landtrace.in', password: '123456', title: 'Quick Test' },
+          { roleKey: 'demo-owner', email: 'owner@landtrace360.demo', password: 'DemoPassword123!', title: 'Demo Land Owner' },
+          { roleKey: 'demo-buyer', email: 'buyer@landtrace360.demo', password: 'DemoPassword123!', title: 'Demo Buyer' },
+          { roleKey: 'demo-inv', email: 'investigator@landtrace360.demo', password: 'DemoPassword123!', title: 'Demo Investigator' }
         ]);
       }
 
@@ -782,8 +898,38 @@ export default async function handler(request) {
         });
       }
 
-      // Fallback 404
-      return jsonResponse({ error: `Route ${pathname} not found on Cloudflare Worker.` }, 404);
+      // Fallback: proxy unhandled routes to Render backend if available, or return 404
+      try {
+        const renderBackendUrl = 'https://landtrace360.onrender.com' + pathname + url.search;
+        const proxyCtrl = new AbortController();
+        const proxyTimer = setTimeout(() => proxyCtrl.abort(), 8000);
+        const fwdHeaders = new Headers(request.headers);
+        fwdHeaders.set('host', 'landtrace360.onrender.com');
+
+        let bodyData = undefined;
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+          bodyData = await request.arrayBuffer().catch(() => undefined);
+        }
+
+        const backendRes = await fetch(renderBackendUrl, {
+          method,
+          headers: fwdHeaders,
+          body: bodyData,
+          signal: proxyCtrl.signal
+        });
+        clearTimeout(proxyTimer);
+
+        const resBody = await backendRes.text();
+        return new Response(resBody, {
+          status: backendRes.status,
+          headers: {
+            ...CORS_HEADERS,
+            'Content-Type': backendRes.headers.get('content-type') || 'application/json'
+          }
+        });
+      } catch (_) {
+        return jsonResponse({ error: `Route ${pathname} not found.` }, 404);
+      }
 
     } catch (err) {
       return jsonResponse({ error: 'Worker internal exception', details: err.message }, 500);
