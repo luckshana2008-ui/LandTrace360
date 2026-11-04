@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: LandTrace360
+    name: landtrace360
     env: python
     region: oregon
     plan: free

@@ -39,3 +39,8 @@ test_cf_worker.js
 *.log
 .DS_Store
 Thumbs.db
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3

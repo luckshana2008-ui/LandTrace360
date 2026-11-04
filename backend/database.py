@@ -18,13 +18,13 @@ logger = logging.getLogger(__name__)
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 if not DATABASE_URL:
-    # For local development, fall back to a local PostgreSQL URL.
-    # Set DATABASE_URL in your .env file or Render dashboard to override this.
-    DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/landtrace360"
-    logger.warning(
-        "DATABASE_URL is not set in environment. "
-        "Falling back to local default: postgresql://postgres:postgres@localhost:5432/landtrace360. "
-        "For persistent production storage on Render, configure DATABASE_URL in Render Environment Variables."
+    # When DATABASE_URL is not set, use local SQLite so startup succeeds immediately without
+    # hanging on an unavailable local PostgreSQL port. Tables and demo data are initialized automatically.
+    # To use a dedicated PostgreSQL database on Render, set DATABASE_URL in Render Environment Variables.
+    DATABASE_URL = "sqlite:///./landtrace360.db"
+    logger.info(
+        "DATABASE_URL not set in environment. Initializing local database: sqlite:///./landtrace360.db. "
+        "For persistent storage across Render rebuilds, configure DATABASE_URL in Render Environment Variables."
     )
 
 # Render uses postgres:// but SQLAlchemy needs postgresql://
